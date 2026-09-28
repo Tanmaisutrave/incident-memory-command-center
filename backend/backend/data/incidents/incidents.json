@@ -1,0 +1,338 @@
+{
+  "counter": 1012,
+  "incidents": [
+    {
+      "incident_id": "INC-1001",
+      "title": "Payment API Redis Timeout and High Latency",
+      "service": "payment-api",
+      "environment": "production",
+      "severity": "P1",
+      "status": "investigating",
+      "timestamp": "2026-09-27T16:24:13.066728",
+      "symptoms": "API response time at 7.5 seconds, Redis timeout errors, 18% error rate, 504 gateway timeouts",
+      "error_logs": "RedisTimeoutError: Connection timeout after 5000ms",
+      "metrics": null,
+      "suspected_causes": [
+        "Redis connection pool exhaustion",
+        "Network issues"
+      ],
+      "tags": [
+        "redis",
+        "timeout",
+        "performance"
+      ],
+      "root_cause": null,
+      "actions_taken": null,
+      "resolution": null,
+      "outcome": null,
+      "downtime": null,
+      "affected_users": null,
+      "lessons_learned": null,
+      "before_metrics": null,
+      "after_metrics": null,
+      "resolved_at": null
+    },
+    {
+      "incident_id": "INC-1002",
+      "title": "Payment API Redis Timeout and High Latency",
+      "service": "payment-api",
+      "environment": "production",
+      "severity": "P1",
+      "status": "resolved",
+      "timestamp": "2026-09-27T16:33:15.560220",
+      "symptoms": "API response time at 7.5 seconds, Redis timeout errors, 18% error rate, 504 gateway timeouts",
+      "error_logs": "RedisTimeoutError: Connection timeout after 5000ms",
+      "metrics": null,
+      "suspected_causes": [
+        "Redis connection pool exhaustion",
+        "Network issues"
+      ],
+      "tags": [
+        "redis",
+        "timeout",
+        "performance"
+      ],
+      "root_cause": "Redis connection pool exhausted at peak load - 250/250 connections in use",
+      "actions_taken": [
+        "Verified Redis server health - healthy",
+        "Checked connection pool metrics - fully saturated",
+        "Increased pool size from 250 to 400",
+        "Added circuit breaker for graceful degradation"
+      ],
+      "resolution": "Increased Redis connection pool from 250 to 400 connections, added circuit breaker",
+      "outcome": "API latency reduced from 7.5s to 800ms, error rate dropped to 0.3%",
+      "downtime": 15.0,
+      "affected_users": 5000,
+      "lessons_learned": "Connection pool from INC-1006 (400) was still insufficient during holiday traffic. Consider auto-scaling pool size based on traffic.",
+      "before_metrics": {
+        "latency_p99": 7500,
+        "error_rate": 0.18,
+        "connections": 250
+      },
+      "after_metrics": {
+        "latency_p99": 800,
+        "error_rate": 0.003,
+        "connections": 180
+      },
+      "resolved_at": "2026-09-27T16:33:22.267547"
+    },
+    {
+      "incident_id": "INC-1004",
+      "title": "Payment API Redis Timeout and High Latency",
+      "service": "payment-api",
+      "environment": "production",
+      "severity": "P1",
+      "status": "resolved",
+      "timestamp": "2026-09-27T16:34:57.625027",
+      "symptoms": "API response time at 7.5 seconds, Redis timeout errors, 18% error rate, 504 gateway timeouts",
+      "error_logs": "RedisTimeoutError: Connection timeout after 5000ms",
+      "metrics": null,
+      "suspected_causes": [
+        "Redis connection pool exhaustion",
+        "Network issues"
+      ],
+      "tags": [
+        "redis",
+        "timeout",
+        "performance"
+      ],
+      "root_cause": "Redis connection pool exhausted at peak load - 250/250 connections in use",
+      "actions_taken": [
+        "Verified Redis server health - healthy",
+        "Checked connection pool metrics - fully saturated",
+        "Increased pool size from 250 to 400",
+        "Added circuit breaker for graceful degradation"
+      ],
+      "resolution": "Increased Redis connection pool from 250 to 400 connections, added circuit breaker",
+      "outcome": "API latency reduced from 7.5s to 800ms, error rate dropped to 0.3%",
+      "downtime": 15.0,
+      "affected_users": 5000,
+      "lessons_learned": "Connection pool from INC-1006 (400) was still insufficient during holiday traffic. Consider auto-scaling pool size based on traffic.",
+      "before_metrics": {
+        "latency_p99": 7500,
+        "error_rate": 0.18,
+        "connections": 250
+      },
+      "after_metrics": {
+        "latency_p99": 800,
+        "error_rate": 0.003,
+        "connections": 180
+      },
+      "resolved_at": "2026-09-27T16:35:04.281741"
+    },
+    {
+      "incident_id": "INC-1006",
+      "title": "Payment API Database Connection Timeout",
+      "service": "payment-api",
+      "environment": "production",
+      "severity": "P1",
+      "status": "diagnosed",
+      "timestamp": "2026-09-28T14:02:56.295678",
+      "symptoms": "Users experiencing 500 errors. Database connection pool appears exhausted. Redis timeouts in logs. Connection timeout errors.",
+      "error_logs": "Redis timeout after 5s, connection pool exhausted. Error: unable to acquire connection from pool",
+      "metrics": null,
+      "suspected_causes": [
+        "redis connection pool",
+        "database connection"
+      ],
+      "tags": [
+        "database",
+        "redis",
+        "timeout"
+      ],
+      "root_cause": null,
+      "actions_taken": null,
+      "resolution": null,
+      "outcome": null,
+      "downtime": null,
+      "affected_users": null,
+      "lessons_learned": null,
+      "before_metrics": null,
+      "after_metrics": null,
+      "resolved_at": null
+    },
+    {
+      "incident_id": "INC-1007",
+      "title": "Order Service Database Timeout",
+      "service": "order-service",
+      "environment": "production",
+      "severity": "P1",
+      "status": "diagnosed",
+      "timestamp": "2026-09-28T14:03:03.211629",
+      "symptoms": "Similar to previous incident - connection timeouts and pool exhaustion. Users seeing errors.",
+      "error_logs": "Connection timeout, pool exhausted",
+      "metrics": null,
+      "suspected_causes": null,
+      "tags": [
+        "database",
+        "timeout"
+      ],
+      "root_cause": null,
+      "actions_taken": null,
+      "resolution": null,
+      "outcome": null,
+      "downtime": null,
+      "affected_users": null,
+      "lessons_learned": null,
+      "before_metrics": null,
+      "after_metrics": null,
+      "resolved_at": null
+    },
+    {
+      "incident_id": "INC-1008",
+      "title": "Payment API experiencing severe latency",
+      "service": "payment-api",
+      "environment": "production",
+      "severity": "P1",
+      "status": "resolved",
+      "timestamp": "2026-09-28T15:35:34.388558",
+      "symptoms": "High API latency\nDatabase connection timeouts\nConnection pool utilization near 100%\nIntermittent payment request failures",
+      "error_logs": null,
+      "metrics": null,
+      "suspected_causes": null,
+      "tags": null,
+      "root_cause": "Database connection pool exhaustion caused by\na connection leak in the payment service.",
+      "actions_taken": [
+        "Database connection utilization returned to normal",
+        "and payment API latency dropped back to approximately",
+        "1 second. Payment requests are succeeding normally."
+      ],
+      "resolution": "Fixed the database connection leak and restarted\nthe affected service instances. Increased monitoring\nfor connection pool utilization.",
+      "outcome": "successfully_resolved",
+      "downtime": null,
+      "affected_users": null,
+      "lessons_learned": null,
+      "before_metrics": null,
+      "after_metrics": null,
+      "resolved_at": "2026-09-28T15:37:26.294605"
+    },
+    {
+      "incident_id": "INC-1009",
+      "title": "Payment API experiencing severe latency",
+      "service": "payment-api",
+      "environment": "production",
+      "severity": "P1",
+      "status": "diagnosed",
+      "timestamp": "2026-09-28T15:48:36.312644",
+      "symptoms": "The payment API is experiencing severe latency and intermittent request failures in production. Response times have increased from around 1 second to 8-10 seconds. Monitoring shows a large number of database connection timeout errors and active database connections are close to the configured connection pool limit. The issue started approximately 20 minutes ago and is affecting payment requests.",
+      "error_logs": "Database connection timeout errors, connection pool near capacity",
+      "metrics": null,
+      "suspected_causes": [
+        "database connection pool exhaustion",
+        "connection leaks"
+      ],
+      "tags": [
+        "database",
+        "connection-pool",
+        "latency",
+        "timeout"
+      ],
+      "root_cause": null,
+      "actions_taken": null,
+      "resolution": null,
+      "outcome": null,
+      "downtime": null,
+      "affected_users": null,
+      "lessons_learned": null,
+      "before_metrics": null,
+      "after_metrics": null,
+      "resolved_at": null
+    },
+    {
+      "incident_id": "INC-1010",
+      "title": "Payment API experiencing severe latency",
+      "service": "payment-api",
+      "environment": "production",
+      "severity": "P1",
+      "status": "diagnosed",
+      "timestamp": "2026-09-28T15:52:26.651167",
+      "symptoms": "The payment API is experiencing severe latency and intermittent request failures in production. Response times have increased from around 1 second to 8-10 seconds. Monitoring shows a large number of database connection timeout errors and active database connections are close to the configured connection pool limit. The issue started approximately 20 minutes ago and is affecting payment requests.",
+      "error_logs": "Database connection timeout errors, connection pool near capacity",
+      "metrics": null,
+      "suspected_causes": [
+        "database connection pool exhaustion",
+        "connection leaks"
+      ],
+      "tags": [
+        "database",
+        "connection-pool",
+        "latency",
+        "timeout"
+      ],
+      "root_cause": null,
+      "actions_taken": null,
+      "resolution": null,
+      "outcome": null,
+      "downtime": null,
+      "affected_users": null,
+      "lessons_learned": null,
+      "before_metrics": null,
+      "after_metrics": null,
+      "resolved_at": null
+    },
+    {
+      "incident_id": "INC-1011",
+      "title": "Payment API experiencing severe latency",
+      "service": "payment-api",
+      "environment": "production",
+      "severity": "P1",
+      "status": "diagnosed",
+      "timestamp": "2026-09-28T16:05:53.279435",
+      "symptoms": "The payment API is experiencing severe latency and intermittent request failures in production. Response times have increased from around 1 second to 8-10 seconds. Monitoring shows a large number of database connection timeout errors and active database connections are close to the configured connection pool limit. The issue started approximately 20 minutes ago and is affecting payment requests.",
+      "error_logs": "Database connection timeout errors, connection pool near capacity",
+      "metrics": null,
+      "suspected_causes": [
+        "database connection pool exhaustion",
+        "connection leaks"
+      ],
+      "tags": [
+        "database",
+        "connection-pool",
+        "latency",
+        "timeout"
+      ],
+      "root_cause": null,
+      "actions_taken": null,
+      "resolution": null,
+      "outcome": null,
+      "downtime": null,
+      "affected_users": null,
+      "lessons_learned": null,
+      "before_metrics": null,
+      "after_metrics": null,
+      "resolved_at": null
+    },
+    {
+      "incident_id": "INC-1012",
+      "title": "Payment API experiencing severe latency",
+      "service": "payment-api",
+      "environment": "production",
+      "severity": "P1",
+      "status": "diagnosed",
+      "timestamp": "2026-09-28T16:08:55.973575",
+      "symptoms": "The payment API is experiencing severe latency and intermittent request failures in production. \nResponse times have increased from ~1 second to 8-10 seconds over the last 20 minutes. \nWe're seeing database connection timeout errors in the logs and the active connection count is approaching the pool limit.",
+      "error_logs": "\n2026-09-27T14:30:15Z ERROR [payment-api] Database connection timeout after 30s\n2026-09-27T14:30:18Z ERROR [payment-api] Connection pool exhausted (50/50 active)\n2026-09-27T14:30:22Z ERROR [payment-api] Failed to acquire database connection\n2026-09-27T14:30:25Z ERROR [payment-api] Transaction rolled back due to timeout\n",
+      "metrics": {
+        "avg_response_time_ms": 8500,
+        "error_rate": 0.15,
+        "active_db_connections": "48/50"
+      },
+      "suspected_causes": [
+        "Database connection leak",
+        "Slow queries",
+        "Connection pool misconfiguration"
+      ],
+      "tags": null,
+      "root_cause": null,
+      "actions_taken": null,
+      "resolution": null,
+      "outcome": null,
+      "downtime": null,
+      "affected_users": null,
+      "lessons_learned": null,
+      "before_metrics": null,
+      "after_metrics": null,
+      "resolved_at": null
+    }
+  ]
+}
