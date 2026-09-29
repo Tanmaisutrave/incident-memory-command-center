@@ -1,348 +1,69 @@
-# Incident Memory Agent
+# Recall — Incident Memory Command Center
 
-**AI-powered incident response with operational memory**
+An incident-response assistant that remembers verified outcomes and failed attempts, then tests that experience against the next incident's evidence. Built with React, FastAPI, Groq and Hindsight.
 
-An intelligent DevOps/SRE agent that accumulates operational experience from previous incidents and uses that experience to improve recommendations for future incidents.
+## Run the prepared project
 
-## 🎯 Problem
+From this folder in PowerShell: `./run.ps1`. Open http://127.0.0.1:8000.
+Use `./run.ps1 -Rebuild` after frontend edits. Stop an existing instance with Ctrl+C before restarting. This is a local, single-team prototype; public hosting requires authentication, authorization and request limits first.
 
-Production incidents often repeat. Engineers waste time investigating problems that their organization has already solved. Knowledge lives in scattered postmortems, runbooks, and tribal memory.
+## First setup on another machine
 
-## 💡 Solution
+Requires Python 3.11+ and Node.js 20+.
 
-The Incident Memory Agent functions like an engineer that never forgets. It:
-
-- **Remembers** every incident, root cause, and resolution
-- **Recalls** similar historical incidents when new problems occur
-- **Learns** from outcomes to improve future recommendations
-- **Explains** which previous experiences influenced its advice
-
-## 🧠 Why Memory Matters
-
-### Without Memory
-Generic troubleshooting: "Check Redis connectivity, network latency, CPU usage..."
-
-### With Hindsight Memory
-Evidence-based recommendations: "3 similar incidents found. 2 were caused by Redis connection pool exhaustion. The previous successful resolution was increasing the pool size from 100 to 250 connections. Check current connection utilization first."
-
-## 🏗️ Architecture
-
-```
-Frontend (React + Vite)
-         ↓
-FastAPI Backend
-         ↓
-Incident Agent
-    ├── Groq LLM (Analysis)
-    └── Hindsight Memory
-         ├── RETAIN (Store incidents)
-         ├── RECALL (Find similar)
-         └── REFLECT (Discover patterns)
-```
-
-## 🚀 Features
-
-- **Intelligent Incident Analysis** - LLM-powered understanding of production issues
-- **Historical Context** - Automatic retrieval of similar past incidents
-- **Evidence-Based Recommendations** - Suggestions backed by previous outcomes
-- **Memory Transparency** - Clear visibility into which memories influenced decisions
-- **Learning Timeline** - Visual representation of knowledge accumulation
-- **Pattern Discovery** - Reflection across multiple incidents to identify trends
-
-## 🛠️ Tech Stack
-
-- **Frontend**: React, Vite, Tailwind CSS
-- **Backend**: Python, FastAPI
-- **AI**: Groq API (Llama 3.3 70B)
-- **Memory**: Hindsight
-- **Deployment**: Vercel (frontend), Render (backend)
-
-## 📁 Project Structure
-
-```
-incident-memory-agent/
-├── frontend/              # React application
-├── backend/               # FastAPI application
-│   ├── app/
-│   │   ├── config.py
-│   │   ├── hindsight_client.py
-│   │   ├── main.py
-│   │   └── ...
-│   └── requirements.txt
-├── scripts/
-│   └── test_hindsight.py  # Hindsight integration test
-├── docs/
-└── README.md
-```
-
-## ⚙️ Setup
-
-### Prerequisites
-
-- Python 3.11+
-- Node.js 18+
-- Hindsight API key
-- Groq API key
-
-### Backend Setup
-
-1. Navigate to backend directory:
 ```powershell
-cd backend
-```
-
-2. Create virtual environment:
-```powershell
-python -m venv venv
-.\venv\Scripts\Activate.ps1
-```
-
-3. Install dependencies:
-```powershell
-pip install -r requirements.txt
-```
-
-4. Configure environment variables:
-```powershell
-Copy-Item .env.example .env
-# Edit .env with your API keys
-```
-
-5. Test Hindsight integration:
-```powershell
-python ..\scripts\test_hindsight.py
-```
-
-6. Run the backend:
-```powershell
-uvicorn app.main:app --reload
-```
-
-### Frontend Setup
-
-1. Navigate to frontend directory:
-```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r backend/requirements.txt
+Copy-Item backend/.env.example backend/.env
 cd frontend
-```
-
-2. Install dependencies:
-```powershell
-npm install
-```
-
-3. Configure environment variables:
-```powershell
-Copy-Item .env.example .env
-# Edit .env if backend is not on localhost:8000
-```
-
-4. Run the development server:
-```powershell
-npm run dev
-```
-
-5. Open http://localhost:5173 in your browser
-
-### Frontend Build
-
-Build for production:
-```powershell
+npm ci
 npm run build
-npm run preview
+cd ..
+./run.ps1
 ```
 
-## 🧪 Testing
+Edit `backend/.env` privately. Set `GROQ_API_KEY`, `HINDSIGHT_API_KEY`, `HINDSIGHT_BASE_URL=https://api.hindsight.vectorize.io`, and a dedicated `HINDSIGHT_BANK_ID`. The default Groq model is `openai/gpt-oss-120b`. Keys never go in frontend code or Git. Existing local keys are already configured in this prepared copy.
 
-### Phase 1: Hindsight Integration
+Without keys, the app opens in setup mode and offers a clearly labelled static walkthrough. Live recommendations require Groq; memory requires Hindsight. An unavailable memory service is disclosed and analysis can continue using current evidence. A failed model response produces an error, never a fabricated diagnosis.
 
-Run the Hindsight integration test:
+## A one-minute demo
 
-```powershell
-python scripts/test_hindsight.py
-```
+See [the demo script](docs/DEMO_SCRIPT.md). The prepared bank has one explicitly synthetic resolved Redis incident. The local timeline also preserves the original checkout's records; imported records are not automatically uploaded to Hindsight.
 
-This verifies:
-- ✓ Hindsight connectivity
-- ✓ RETAIN - Store incident memories
-- ✓ RECALL - Retrieve similar incidents
-- ✓ REFLECT - Discover patterns
+1. **Memory comparison:** choose Recurring Redis timeout and compare the same input with and without history. Open the cited fragments and show exactly what history contributed.
+2. **Incident workspace:** choose Same symptom, new cause. The old pool fix should be challenged by low pool wait and current packet loss.
+3. **Add what happened next:** record an unsuccessful attempt, re-analyze, and verify the recommendation accounts for it.
+4. **Record outcome:** choose resolved, mitigated or escalated. Local persistence and remote memory delivery are separate; a failed delivery exposes a retry button.
+5. **Memory explorer / Learning journal:** retrieve recorded experience or request a Hindsight reflection.
 
-### Phase 2: Backend Tests
+These are model-generated hypotheses for human review, not automatic remediation. Source identifiers prove retrieval provenance, not factual correctness. Confirm the suggested checks and recovery signals.
 
-Run the backend tests:
+## What changed
 
-```powershell
-cd backend
-.\venv\Scripts\Activate.ps1
-pytest tests/ -v
-```
+- Responsive slate-and-mint UI with visible evidence, actual request timings, source details and recoverable errors.
+- Real memory-on/off comparison, run concurrently with the same model and instructions.
+- Groq strict structured responses with local validation, known-source checks, explicit uncertainty, disconfirming checks and recovery criteria. Removed hard-coded diagnosis and invented confidence scores.
+- SQLite persistence for incidents, analysis and updates. Memory delivery is reported only after provider acknowledgment; partial and escalated outcomes retain their actual status.
+- No artificial loading delays, bounded provider calls, capped retrieval and one model call per analysis. Past model answers are excluded from fresh analysis input.
 
-## 📊 Demo Scenario
-
-1. **Incident #1**: Redis connection pool exhaustion - Agent learns the pattern
-2. **Incident #2**: Similar symptoms - Agent recalls previous incident and suggests the same fix
-3. **Incident #3**: Similar symptoms, different cause - Agent distinguishes between cases
-
-## 🔒 Security
-
-- Never commit `.env` files
-- Use environment variables for all secrets
-- API keys are never exposed in responses
-
-## 🚧 Development Status
-
-**Current Phase**: Phase 3 - Frontend Complete ✅
-
-**Phase 1**: ✅ Hindsight Integration
-- [x] Hindsight client setup
-- [x] RETAIN/RECALL/REFLECT verified
-- [x] Integration tests passing
-
-**Phase 2**: ✅ Core Backend Agent
-- [x] LLM integration (Groq)
-- [x] Incident data models
-- [x] Memory service
-- [x] Analysis service
-- [x] Incident service
-- [x] Core agent logic
-- [x] FastAPI endpoints (11 endpoints)
-- [x] Seed data (12 incidents)
-- [x] Backend tests (7/7 passing)
-
-**Phase 3**: ✅ Frontend (COMPLETE)
-- [x] React + Vite + Tailwind setup
-- [x] Professional dark theme UI
-- [x] Dashboard page
-- [x] Analyze Incident page with memory display
-- [x] Memory Explorer page (RECALL)
-- [x] Learning Center page (REFLECT)
-- [x] Compare Incidents page
-- [x] Backend API integration
-- [x] Historical memory prominently displayed
-
-**Phase 4**: 🔜 Polish & Demo
-- [ ] Advanced features
-- [ ] Authentication
-- [ ] Performance optimization
-
-## 🎮 Running the Application
-
-### Complete Setup (Backend + Frontend)
-
-#### 1. Seed Historical Incidents
-
-Populate Hindsight with synthetic incident data:
+## Verify
 
 ```powershell
-cd backend
-.\venv\Scripts\Activate.ps1
-py ..\scripts\seed_incidents.py
-```
-
-This creates 12 realistic production incidents in Hindsight memory.
-
-#### 2. Start the Backend Server
-
-```powershell
-cd backend
-.\venv\Scripts\Activate.ps1
-uvicorn app.main:app --reload
-```
-
-The API will be available at http://127.0.0.1:8000
-
-#### 3. Start the Frontend (New Terminal)
-
-```powershell
+.\.venv\Scripts\python.exe -m pytest backend/tests -q -p no:cacheprovider
 cd frontend
-npm run dev
+npm run build
 ```
 
-The UI will be available at http://localhost:5173
+Tests run offline without provider usage. Live tests consume provider quota and should use synthetic data in a dedicated bank. The saved live result in `docs/live-verification.json` is a real synthetic test output; it is not a canned API response. Timing is one observed run, not a benchmark or latency guarantee.
 
-#### 4. Explore the Application
+## Storage and operation
 
-Open http://localhost:5173 in your browser and:
-- View the Dashboard with system stats
-- Click "Analyze New Incident" to test incident analysis
-- Try demo incident buttons for quick testing
-- Notice the **Historical Memory section** showing related past incidents
-- Explore memories in the Memory Explorer
-- Generate insights in the Learning Center
-- Compare incidents to find patterns
+- `backend/.env`: private credentials, ignored by Git.
+- `backend/data/incidents.sqlite3`: local durable records, ignored by Git. Back up this file to preserve the workspace.
+- Hindsight bank: remote memory; separate from the SQLite list. Retrying a save uses the incident's stable document ID.
+- `frontend/dist`: generated assets served by FastAPI. API documentation: http://127.0.0.1:8000/docs.
+- Counters for successful recalls/retains are session counters; dashboard incident totals come from local persisted records.
 
-### API Endpoints
+No infrastructure actions, messages, public deployment or Git push are performed by this app. Logs and incident text supplied for analysis are sent to the configured AI/memory providers; use synthetic or appropriately redacted inputs.
 
-**Core Workflows:**
-- `POST /api/incidents/analyze` - Analyze a new incident with memory
-- `POST /api/incidents/{id}/resolve` - Resolve and store to memory
-- `POST /api/incidents/compare` - Compare with/without memory
-
-**Memory Operations:**
-- `POST /api/memory/recall` - Manual memory search
-- `POST /api/memory/reflect` - Pattern discovery
-- `GET /api/memory/stats` - Memory statistics
-
-**Utilities:**
-- `GET /api/health` - System health check
-- `GET /api/incidents/{id}` - Get incident details
-- `GET /api/incidents/{id}/memories` - Get related memories
-
-## 🎯 Testing the Agent
-
-### Test Scenario 1: Analyze with Memory
-
-```bash
-curl -X POST http://localhost:8000/api/incidents/analyze \
-  -H "Content-Type: application/json" \
-  -d '{
-    "title": "Payment API Redis Timeout",
-    "service": "payment-api",
-    "environment": "production",
-    "severity": "P1",
-    "symptoms": "API latency 7 seconds, Redis timeout errors, 502 responses"
-  }'
-```
-
-The agent will:
-1. Recall similar historical incidents (INC-1001, INC-1006)
-2. Analyze with historical context
-3. Provide evidence-based recommendations
-
-### Test Scenario 2: Compare With/Without Memory
-
-```bash
-curl -X POST http://localhost:8000/api/incidents/compare \
-  -H "Content-Type: application/json" \
-  -d '{
-    "incident": {
-      "title": "Database Connection Issues",
-      "service": "order-service",
-      "environment": "production",
-      "severity": "P1",
-      "symptoms": "Connection timeouts, pool exhausted"
-    }
-  }'
-```
-
-This demonstrates the difference between generic and memory-informed analysis.
-
-### Test Scenario 3: Reflect on Patterns
-
-```bash
-curl -X POST http://localhost:8000/api/memory/reflect \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "What are the most common incident patterns and their resolutions?"
-  }'
-```
-
-## 📝 License
-
-MIT
-
-## 🤝 Hackathon
-
-Built for the Hindsight AI Agent Hackathon.
-
-**Focus**: Demonstrating how persistent memory transforms an AI agent from generic advice-giver to experienced operational partner.
+Provider format reference: [Groq structured outputs](https://console.groq.com/docs/structured-outputs). Schema compliance controls format; it does not establish that a diagnosis or suggested threshold is correct. Review all recommendations against actual telemetry.

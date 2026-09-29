@@ -74,7 +74,7 @@ class MemoryService:
             
         except Exception as e:
             logger.error(f"Failed to recall similar incidents: {e}")
-            return []
+            raise
     
     def retain_resolved_incident(
         self,
@@ -107,7 +107,7 @@ class MemoryService:
             }
             
             # Build context
-            context = f"Resolved incident for {incident.get('service')} in {incident.get('environment')}"
+            context = f"Reported outcome {resolution.get('outcome')} for {incident.get('service')} in {incident.get('environment')}"
             
             logger.info(f"Retaining incident {incident.get('incident_id')} to memory")
             
@@ -119,8 +119,9 @@ class MemoryService:
             )
             
             # Update stats
-            self.retain_count += 1
-            self.last_retain = datetime.utcnow()
+            if result.get("success"):
+                self.retain_count += 1
+                self.last_retain = datetime.utcnow()
             
             logger.info(f"Successfully retained incident {incident.get('incident_id')}")
             return result.get("success", False)
@@ -158,7 +159,7 @@ class MemoryService:
             
         except Exception as e:
             logger.error(f"Failed to reflect on patterns: {e}")
-            return "Reflection failed: Unable to analyze patterns"
+            raise
     
     def get_stats(self) -> Dict[str, Any]:
         """

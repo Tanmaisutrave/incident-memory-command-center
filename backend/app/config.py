@@ -1,18 +1,19 @@
 """Configuration management using environment variables."""
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pathlib import Path
 
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
     
     # Hindsight
-    hindsight_api_key: str
+    hindsight_api_key: str = ""
     hindsight_base_url: str = "https://api.hindsight.vectorize.io"
     hindsight_bank_id: str = "incident-agent"
     
     # Groq
-    groq_api_key: str
+    groq_api_key: str = ""
     groq_model: str = "openai/gpt-oss-120b"
     
     # Application
@@ -21,7 +22,7 @@ class Settings(BaseSettings):
     environment: str = "development"
     
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(Path(__file__).resolve().parents[1] / '.env'),
         env_file_encoding="utf-8",
         case_sensitive=False
     )

@@ -225,6 +225,7 @@ def build_resolution_memory_content(
             "\n".join(f"- {action}" for action in resolution.get('preventive_actions', [])),
         ])
     
+    content_parts.extend(["", "RECORDED UPDATES:", str(incident.get("updates", []))])
     return "\n".join(content_parts)
 
 

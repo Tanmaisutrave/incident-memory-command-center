@@ -110,8 +110,8 @@ class IncidentMemoryAgent:
         return {
             "incident_id": incident_id,
             "status": incident.status.value,
-            "memory_retained": True,
-            "message": "Incident resolved and added to operational memory"
+            "memory_retained": incident.memory_retained,
+            "message": "Outcome recorded; memory saved" if incident.memory_retained else "Outcome recorded; memory save needs retry"
         }
     
     def demonstrate_learning(

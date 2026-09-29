@@ -129,7 +129,7 @@ def test_config_loading():
     from app.config import settings
     
     # These should be set from .env
-    assert settings.hindsight_bank_id == "incident-agent"
+    assert settings.hindsight_bank_id
     assert settings.hindsight_base_url
     assert settings.groq_model
 

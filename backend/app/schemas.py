@@ -3,6 +3,7 @@
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 from enum import Enum
+from typing import Literal
 from pydantic import BaseModel, Field
 
 
@@ -29,6 +30,8 @@ class IncidentStatus(str, Enum):
     RESOLVING = "resolving"
     RESOLVED = "resolved"
     CLOSED = "closed"
+    MITIGATED = "mitigated"
+    ESCALATED = "escalated"
 
 
 class IncidentCreate(BaseModel):
@@ -37,8 +40,8 @@ class IncidentCreate(BaseModel):
     service: str = Field(..., min_length=2, max_length=100)
     environment: Environment
     severity: Severity
-    symptoms: str = Field(..., min_length=10)
-    error_logs: Optional[str] = None
+    symptoms: str = Field(..., min_length=10, max_length=12000)
+    error_logs: Optional[str] = Field(default=None, max_length=20000)
     metrics: Optional[Dict[str, Any]] = None
     suspected_causes: Optional[List[str]] = None
     tags: Optional[List[str]] = None
@@ -74,6 +77,9 @@ class Incident(BaseModel):
     before_metrics: Optional[Dict[str, Any]] = None
     after_metrics: Optional[Dict[str, Any]] = None
     resolved_at: Optional[datetime] = None
+    memory_retained: bool = False
+    analysis: Optional[Dict[str, Any]] = None
+    updates: List[Dict[str, Any]] = Field(default_factory=list)
     
     class Config:
         from_attributes = True
@@ -96,6 +102,7 @@ class HistoricalIncident(BaseModel):
     memory_text: str
     relevance_score: Optional[float] = None
     memory_type: Optional[str] = None
+    source_id: Optional[str] = None
 
 
 class AnalysisResponse(BaseModel):
@@ -103,7 +110,7 @@ class AnalysisResponse(BaseModel):
     incident_id: str
     summary: str
     likely_root_cause: str
-    confidence: float = Field(..., ge=0.0, le=1.0)
+    confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     severity_assessment: Severity
     
     # Historical context
@@ -120,6 +127,13 @@ class AnalysisResponse(BaseModel):
     # Metadata
     analysis_timestamp: datetime = Field(default_factory=datetime.utcnow)
     used_memory: bool = True
+    memory_status: str = "disabled"
+    warnings: List[str] = Field(default_factory=list)
+    timings_ms: Dict[str, float] = Field(default_factory=dict)
+    evidence_assessment: str = "Unconfirmed hypothesis"
+    disconfirming_checks: List[str] = Field(default_factory=list)
+    verification_steps: List[str] = Field(default_factory=list)
+    cited_sources: List[str] = Field(default_factory=list)
 
 
 class ResolutionRequest(BaseModel):
@@ -127,7 +141,7 @@ class ResolutionRequest(BaseModel):
     root_cause: str = Field(..., min_length=10)
     actions_taken: List[str] = Field(..., min_length=1)
     resolution: str = Field(..., min_length=10)
-    outcome: str = Field(..., min_length=10)
+    outcome: Literal['successfully_resolved', 'partially_resolved', 'unresolved_escalated']
     before_metrics: Optional[Dict[str, Any]] = None
     after_metrics: Optional[Dict[str, Any]] = None
     downtime: Optional[float] = None
@@ -193,3 +207,24 @@ class ComparisonRequest(BaseModel):
     """Request for before/after memory comparison."""
     incident: IncidentCreate
     use_memory: bool = True
+
+
+class IncidentUpdate(BaseModel):
+    note: str = Field(..., min_length=10, max_length=5000)
+    kind: Literal['evidence', 'failed_attempt'] = 'evidence'
+
+
+class Diagnosis(BaseModel):
+    """Only model-authored fields. All claims remain hypotheses until verified."""
+    model_config = {'extra': 'forbid'}
+    summary: str = Field(min_length=1, max_length=1500)
+    likely_root_cause: str = Field(min_length=1, max_length=1500)
+    evidence_assessment: str
+    investigation_steps: List[str] = Field(min_length=1, max_length=5)
+    recommended_actions: List[str] = Field(max_length=5)
+    disconfirming_checks: List[str] = Field(min_length=1, max_length=4)
+    verification_steps: List[str] = Field(min_length=1, max_length=4)
+    historical_evidence: List[str] = Field(max_length=5)
+    memory_insights: List[str] = Field(max_length=4)
+    cited_sources: List[str] = Field(max_length=5)
+    risk_notes: str

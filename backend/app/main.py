@@ -1,367 +1,128 @@
-"""Main FastAPI application for Incident Memory Agent."""
-
+"""Incident API. Sync routes run in FastAPI's worker pool, never block its event loop."""
 import logging
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
-from contextlib import asynccontextmanager
-from datetime import datetime
-
-from fastapi import FastAPI, HTTPException, status
+from pathlib import Path
+from time import monotonic
+from threading import Lock
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from app.config import settings
-from app.schemas import (
-    HealthResponse, IncidentCreate, AnalysisResponse,
-    ResolutionRequest, ResolutionResponse, IncidentStatus,
-    MemoryRecallRequest, MemoryRecallResponse, HistoricalIncident,
-    MemoryReflectRequest, MemoryReflectResponse, MemoryStats,
-    ComparisonRequest
-)
+from app.schemas import IncidentCreate, ResolutionRequest, IncidentUpdate, ComparisonRequest, MemoryRecallRequest, MemoryReflectRequest
 from app.services.incident_service import incident_service
 from app.services.memory_service import memory_service
 from app.hindsight_client import hindsight_client
 from app.llm import llm_client
-from app.prompts import build_reflection_query
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
 logger = logging.getLogger(__name__)
-
-# Thread pool for blocking operations
-executor = ThreadPoolExecutor(max_workers=4)
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Application lifespan manager."""
-    logger.info("Starting Incident Memory Agent")
-    logger.info(f"Hindsight Bank: {settings.hindsight_bank_id}")
-    logger.info(f"Groq Model: {settings.groq_model}")
-    yield
-    logger.info("Shutting down Incident Memory Agent")
-
-
-# Create FastAPI app
-app = FastAPI(
-    title="Incident Memory Agent",
-    description="AI-powered incident response with operational memory",
-    version="2.0.0",
-    lifespan=lifespan
-)
-
-# Add CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[settings.frontend_url, "http://localhost:3000", "http://localhost:5173"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
+app = FastAPI(title='Incident Memory Command Center', version='3.0.0')
+app.add_middleware(CORSMiddleware, allow_origins=[settings.frontend_url, 'http://localhost:5173', 'http://127.0.0.1:5173'], allow_methods=['GET','POST'], allow_headers=['Content-Type'])
 
 @app.exception_handler(Exception)
-async def global_exception_handler(request, exc):
-    """Global exception handler."""
-    logger.error(f"Unhandled exception: {exc}", exc_info=True)
-    return JSONResponse(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={"detail": "Internal server error occurred"}
-    )
+async def failure(request, exc):
+    logger.error('Request failed: %s', type(exc).__name__)
+    # Never expose upstream errors or credentials to the browser.
+    return JSONResponse(status_code=502, content={'detail': 'The service could not complete this request. Check backend configuration or retry. No substitute diagnosis was generated.'})
 
+@app.exception_handler(RuntimeError)
+async def invalid_response(request, exc):
+    return JSONResponse(status_code=502, content={'detail': str(exc)})
 
-# Health endpoint
-@app.get("/api/health", response_model=HealthResponse)
-async def health_check():
-    """
-    Health check endpoint.
-    
-    Returns system health status.
-    """
+@app.exception_handler(ValueError)
+async def invalid_request(request, exc):
+    return JSONResponse(status_code=400, content={'detail': str(exc)})
+
+@app.get('/api/health')
+def health():
+    configured = lambda key: bool(key and not key.startswith('your_'))
+    return {'status': 'ready' if configured(settings.groq_api_key) and configured(settings.hindsight_api_key) else 'setup_required',
+        'groq_status': 'configured' if configured(settings.groq_api_key) else 'not_configured',
+        'hindsight_status': 'configured' if configured(settings.hindsight_api_key) else 'not_configured',
+        'bank_id': settings.hindsight_bank_id, 'model': settings.groq_model,
+        'note': 'Configuration status only. Use Check connections to verify connectivity.'}
+
+_health_cache = {}
+_health_lock = Lock()
+@app.get('/api/connections')
+def connections():
+    with _health_lock:
+        if monotonic() - _health_cache.get('time', -100) < 60:
+            return _health_cache['value']
+        result = {}
+        for name, check in [('groq', llm_client.health_check), ('hindsight', hindsight_client.health_check)]:
+            try:
+                result[name] = 'connected' if check() else 'unavailable'
+            except Exception:
+                result[name] = 'unavailable'
+        _health_cache.update(time=monotonic(), value=result)
+        return result
+
+@app.get('/api/incidents')
+def incidents():
+    return incident_service.list_incidents()
+
+@app.post('/api/incidents/analyze')
+def analyze(data: IncidentCreate):
+    incident = incident_service.create_incident(data)
     try:
-        # Check Hindsight
-        hindsight_healthy = hindsight_client.health_check()
-        hindsight_status = "healthy" if hindsight_healthy else "unhealthy"
-        
-        # Check Groq
-        groq_healthy = llm_client.health_check()
-        groq_status = "healthy" if groq_healthy else "unhealthy"
-        
-        # Overall status
-        overall_status = "healthy" if (hindsight_healthy and groq_healthy) else "degraded"
-        
-        return HealthResponse(
-            status=overall_status,
-            hindsight_status=hindsight_status,
-            groq_status=groq_status
-        )
-    except Exception as e:
-        logger.error(f"Health check failed: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Health check failed"
-        )
+        return incident_service.analyze_incident(incident.incident_id)
+    except Exception as exc:
+        raise HTTPException(502, f'Analysis failed. Incident {incident.incident_id} is saved; open it from Overview to retry. Check provider configuration and connectivity.') from exc
 
+@app.post('/api/incidents/compare')
+def compare(data: ComparisonRequest):
+    return incident_service.compare_analysis(data.incident)
 
-# Incident endpoints
-@app.post("/api/incidents/analyze", response_model=AnalysisResponse)
-async def analyze_incident(incident_data: IncidentCreate):
-    """
-    Analyze a new incident.
-    
-    This endpoint:
-    1. Creates an incident record
-    2. Recalls similar historical incidents from Hindsight
-    3. Analyzes the incident using AI with historical context
-    4. Returns structured diagnosis and recommendations
-    """
-    try:
-        logger.info(f"Analyzing new incident: {incident_data.title}")
-        
-        # Create incident
-        incident = incident_service.create_incident(incident_data)
-        
-        # Analyze with memory
-        analysis = incident_service.analyze_incident(
-            incident_id=incident.incident_id,
-            use_memory=True
-        )
-        
-        return analysis
-        
-    except Exception as e:
-        logger.error(f"Incident analysis failed: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Analysis failed: {str(e)}"
-        )
+@app.get('/api/incidents/{incident_id}')
+def incident(incident_id: str):
+    item = incident_service.get_incident(incident_id)
+    if not item:
+        raise HTTPException(404, 'Incident not found')
+    return item
 
+@app.post('/api/incidents/{incident_id}/analyze')
+def reanalyze(incident_id: str):
+    return incident_service.analyze_incident(incident_id)
 
-@app.post("/api/incidents/{incident_id}/resolve", response_model=ResolutionResponse)
-async def resolve_incident(incident_id: str, resolution: ResolutionRequest):
-    """
-    Resolve an incident and store it in memory.
-    
-    This endpoint:
-    1. Updates the incident with resolution details
-    2. Retains the incident and outcome to Hindsight
-    3. Makes the incident available for future analysis
-    """
-    try:
-        logger.info(f"Resolving incident: {incident_id}")
-        
-        # Resolve incident
-        incident = incident_service.resolve_incident(
-            incident_id=incident_id,
-            resolution=resolution
-        )
-        
-        return ResolutionResponse(
-            incident_id=incident_id,
-            status=incident.status,
-            memory_retained=True,
-            message=f"Incident {incident_id} resolved and retained to memory"
-        )
-        
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(e)
-        )
-    except Exception as e:
-        logger.error(f"Resolution failed: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Resolution failed: {str(e)}"
-        )
+@app.post('/api/incidents/{incident_id}/updates')
+def update(incident_id: str, data: IncidentUpdate):
+    return incident_service.add_update(incident_id, data)
 
+@app.post('/api/incidents/{incident_id}/resolve')
+def resolve(incident_id: str, data: ResolutionRequest):
+    item = incident_service.resolve_incident(incident_id, data)
+    return {'incident_id': incident_id, 'status': item.status, 'memory_retained': item.memory_retained,
+        'message': 'Outcome saved and memory retained.' if item.memory_retained else 'Outcome saved locally. Memory delivery failed; retry from this incident.'}
 
-@app.get("/api/incidents/{incident_id}")
-async def get_incident(incident_id: str):
-    """
-    Get an incident by ID.
-    
-    Returns the complete incident record.
-    """
-    try:
-        incident = incident_service.get_incident(incident_id)
-        
-        if not incident:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Incident {incident_id} not found"
-            )
-        
-        return incident
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to get incident: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve incident"
-        )
+@app.post('/api/incidents/{incident_id}/retry-memory')
+def retry_memory(incident_id: str):
+    return incident_service.retry_memory(incident_id)
 
+@app.get('/api/incidents/{incident_id}/memories')
+def memories(incident_id: str):
+    return incident_service.get_incident_memories(incident_id)
 
-@app.get("/api/incidents/{incident_id}/memories")
-async def get_incident_memories(incident_id: str):
-    """
-    Get historical memories related to an incident.
-    
-    Returns similar incidents from Hindsight memory.
-    """
-    try:
-        memories = incident_service.get_incident_memories(incident_id)
-        return memories
-        
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(e)
-        )
-    except Exception as e:
-        logger.error(f"Failed to get memories: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve memories"
-        )
+@app.post('/api/memory/recall')
+def recall(data: MemoryRecallRequest):
+    rows = hindsight_client.recall(data.query, data.max_tokens, data.budget)
+    return {'query': data.query, 'memories': [{'memory_text': m['text'], 'source_id': m['source_id'], 'memory_type': m['type']} for m in rows], 'count': len(rows)}
 
+@app.post('/api/memory/reflect')
+def reflect(data: MemoryReflectRequest):
+    return {'query': data.query, 'reflection': memory_service.reflect_on_patterns(data.query, data.budget)}
 
-# Memory endpoints
-@app.post("/api/memory/recall", response_model=MemoryRecallResponse)
-async def recall_memory(request: MemoryRecallRequest):
-    """
-    Manually recall memories from Hindsight.
-    
-    Useful for testing and exploring the memory bank.
-    """
-    try:
-        logger.info(f"Manual recall: {request.query[:50]}...")
-        
-        # Run blocking Hindsight call in executor
-        loop = asyncio.get_event_loop()
-        memories = await loop.run_in_executor(
-            executor,
-            lambda: hindsight_client.recall(
-                query=request.query,
-                max_tokens=request.max_tokens,
-                budget=request.budget
-            )
-        )
-        
-        historical_incidents = [
-            HistoricalIncident(
-                memory_text=mem.get('text', ''),
-                memory_type=mem.get('type')
-            )
-            for mem in memories
-        ]
-        
-        return MemoryRecallResponse(
-            query=request.query,
-            memories=historical_incidents,
-            count=len(historical_incidents)
-        )
-        
-    except Exception as e:
-        logger.error(f"Recall failed: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Recall failed: {str(e)}"
-        )
+@app.get('/api/memory/stats')
+def stats():
+    rows = incident_service.list_incidents()
+    return {**memory_service.get_stats(), 'total_incidents': len(rows),
+        'retained_incidents': sum(i.memory_retained for i in rows),
+        'active_incidents': sum(i.status.value not in ('resolved','closed') for i in rows),
+        'scope': 'Local incident records. Recall counters cover this server session only.'}
 
-
-@app.post("/api/memory/reflect", response_model=MemoryReflectResponse)
-async def reflect_memory(request: MemoryReflectRequest):
-    """
-    Perform reflection to discover patterns across memories.
-    
-    Analyzes historical incidents to identify trends and insights.
-    """
-    try:
-        logger.info(f"Reflection: {request.query[:50]}...")
-        
-        # Run blocking reflection in executor
-        loop = asyncio.get_event_loop()
-        reflection = await loop.run_in_executor(
-            executor,
-            lambda: memory_service.reflect_on_patterns(
-                query=request.query,
-                budget=request.budget
-            )
-        )
-        
-        return MemoryReflectResponse(
-            query=request.query,
-            reflection=reflection
-        )
-        
-    except Exception as e:
-        logger.error(f"Reflection failed: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Reflection failed: {str(e)}"
-        )
-
-
-@app.get("/api/memory/stats", response_model=MemoryStats)
-async def get_memory_stats():
-    """
-    Get memory service statistics.
-    
-    Returns usage statistics for the memory bank.
-    """
-    try:
-        stats = memory_service.get_stats()
-        return MemoryStats(**stats)
-        
-    except Exception as e:
-        logger.error(f"Failed to get stats: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve statistics"
-        )
-
-
-@app.post("/api/incidents/compare")
-async def compare_analysis(request: ComparisonRequest):
-    """
-    Compare incident analysis with and without memory.
-    
-    Demonstrates the value of historical memory.
-    """
-    try:
-        logger.info("Comparing analysis with/without memory")
-        
-        comparison = incident_service.compare_analysis(request.incident)
-        
-        return comparison
-        
-    except Exception as e:
-        logger.error(f"Comparison failed: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Comparison failed: {str(e)}"
-        )
-
-
-# Root endpoint
-@app.get("/")
-async def root():
-    """Root endpoint."""
-    return {
-        "name": "Incident Memory Agent",
-        "version": "2.0.0",
-        "description": "AI-powered incident response with operational memory",
-        "docs": "/docs",
-        "health": "/api/health"
-    }
-
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+# A production build is served by the same process, avoiding a second deployment and CORS setup.
+dist = Path(__file__).resolve().parents[2] / 'frontend' / 'dist'
+if dist.exists():
+    app.mount('/assets', StaticFiles(directory=dist / 'assets'), name='assets')
+    @app.get('/')
+    def index():
+        return FileResponse(dist / 'index.html')

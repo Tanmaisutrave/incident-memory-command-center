@@ -21,6 +21,8 @@ wheels/
 *.egg
 MANIFEST
 venv/
+.venv/
+backend/data/
 ENV/
 env/
 
