@@ -28,23 +28,12 @@ class MemoryService:
         symptoms: str,
         error_logs: Optional[str] = None,
         suspected_causes: Optional[List[str]] = None,
+        updates: Optional[List[Dict[str, Any]]] = None,
         max_tokens: int = 4096,
         budget: str = "mid"
     ) -> List[Dict[str, Any]]:
         """
         Recall similar historical incidents from Hindsight.
-        
-        Args:
-            service: Service name
-            environment: Environment
-            symptoms: Incident symptoms
-            error_logs: Optional error logs
-            suspected_causes: Optional suspected causes
-            max_tokens: Maximum tokens for recall
-            budget: Budget level
-            
-        Returns:
-            List of historical incident memories
         """
         try:
             # Build semantic query
@@ -53,30 +42,31 @@ class MemoryService:
                 environment=environment,
                 symptoms=symptoms,
                 error_logs=error_logs,
-                suspected_causes=suspected_causes
+                suspected_causes=suspected_causes,
+                updates=updates,
             )
-            
+
             logger.info(
                 "Recalling memories for service=%r env=%r symptoms_len=%d error_logs_len=%d",
                 service, environment, len(symptoms or ""), len(error_logs or ""),
             )
-            
+
             # Recall from Hindsight
             memories = self.hindsight.recall(
                 query=query,
                 max_tokens=max_tokens,
                 budget=budget
             )
-            
+
             # Update stats
             self.recall_count += 1
             self.last_recall = datetime.utcnow()
-            
+
             logger.info("Recalled %d historical incidents", len(memories))
             return memories
-            
+
         except Exception as e:
-            logger.error(f"Failed to recall similar incidents: {e}")
+            logger.error("Failed to recall similar incidents [type=%s]", type(e).__name__)
             raise
     
     def retain_resolved_incident(

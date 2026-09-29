@@ -57,6 +57,8 @@ DIAGNOSIS = dict(
     summary="Certificate failure needs verification.",
     likely_root_cause="Expired partner certificate.",
     evidence_assessment="Reported error supports an unconfirmed hypothesis.",
+    severity_assessment="P2",
+    severity_reasoning="P2 assigned; major partner functionality impaired.",
     investigation_steps=["Check certificate validity dates."],
     recommended_actions=["Renew only if expiry is confirmed."],
     disconfirming_checks=["A valid certificate would contradict expiration."],
@@ -78,8 +80,10 @@ RESOLUTION = dict(
 def _make_analyzer():
     svc = AnalysisService()
     svc.memory = SimpleNamespace(recall_similar_incidents=Mock(return_value=[]))
+    raw = json.dumps(DIAGNOSIS)
     svc.llm = SimpleNamespace(
-        generate_json=Mock(return_value=json.dumps(DIAGNOSIS))
+        generate_json=Mock(return_value=raw),
+        generate_json_with_correction=Mock(return_value=raw),
     )
     return svc
 

@@ -39,6 +39,8 @@ DIAGNOSIS = dict(
     summary='Certificate failure needs verification.',
     likely_root_cause='Expired partner certificate.',
     evidence_assessment='Reported error supports an unconfirmed hypothesis.',
+    severity_assessment='P2',
+    severity_reasoning='P2 assigned; major partner functionality impaired.',
     investigation_steps=['Check certificate validity dates.'],
     recommended_actions=['Renew only if expiry is confirmed.'],
     disconfirming_checks=['A valid certificate would contradict expiration.'],
@@ -59,7 +61,11 @@ RESOLUTION = dict(
 def analyzer(memories=None, diagnosis=None):
     svc = AnalysisService()
     svc.memory = SimpleNamespace(recall_similar_incidents=Mock(return_value=memories or []))
-    svc.llm = SimpleNamespace(generate_json=Mock(return_value=json.dumps(diagnosis or DIAGNOSIS)))
+    raw = json.dumps(diagnosis or DIAGNOSIS)
+    svc.llm = SimpleNamespace(
+        generate_json=Mock(return_value=raw),
+        generate_json_with_correction=Mock(return_value=raw),
+    )
     return svc
 
 
@@ -85,14 +91,19 @@ def test_non_database_diagnosis_and_no_invented_confidence():
 
 def test_malformed_output_is_rejected():
     svc = analyzer()
+    # Both first attempt and correction retry return malformed output
     svc.llm.generate_json.return_value = 'TLS certificate expired.'
+    svc.llm.generate_json_with_correction.return_value = 'TLS certificate expired.'
     with pytest.raises(RuntimeError, match='No diagnosis was substituted'):
         svc.analyze_incident({'incident_id': 'test', **INCIDENT})
 
 
 def test_unknown_source_is_rejected():
+    bad = json.dumps({**DIAGNOSIS, 'cited_sources': ['invented']})
     svc = analyzer(diagnosis={**DIAGNOSIS, 'cited_sources': ['invented']})
-    with pytest.raises(RuntimeError, match='unknown memory'):
+    svc.llm.generate_json.return_value = bad
+    svc.llm.generate_json_with_correction.return_value = bad
+    with pytest.raises(RuntimeError, match='No diagnosis was substituted'):
         svc.analyze_incident({'incident_id': 'test', **INCIDENT})
 
 
@@ -173,15 +184,17 @@ def test_update_saved_when_memory_is_down(tmp_path):
 
 def test_compare_parallel_and_no_persisted_incident(tmp_path):
     svc = make_svc(tmp_path)
-    barrier = Barrier(2)
-
-    def analyze(incident, use_memory):
-        barrier.wait(timeout=2)
-        return use_memory
-
-    svc.analysis = SimpleNamespace(analyze_incident=analyze)
+    # compare_analysis now delegates to analysis_svc.compare_analysis
+    # Patch it to return the expected structure directly
+    svc.analysis = SimpleNamespace(
+        compare_analysis=Mock(return_value={
+            'without_memory': False,
+            'with_memory': True,
+            'differences': {},
+        })
+    )
     result = svc.compare_analysis(IncidentCreate(**INCIDENT))
-    assert result == {'without_memory': False, 'with_memory': True}
+    assert result == {'without_memory': False, 'with_memory': True, 'differences': {}}
     assert svc.list_incidents() == []
 
 

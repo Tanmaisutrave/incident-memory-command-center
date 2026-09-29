@@ -946,8 +946,37 @@ function Analysis({ analysis: a, sample = false, compact = false }) {
               <ShieldCheck size={16} />
               <p>{a.evidence_assessment}</p>
             </div>
+            {a.severity_reasoning && (
+              <div className="evidence-assessment">
+                <Activity size={16} />
+                <p>
+                  <strong>Severity {a.severity_assessment}:</strong>{" "}
+                  {a.severity_reasoning}
+                </p>
+              </div>
+            )}
           </div>
         </section>
+        {a.flagged_actions?.length > 0 && (
+          <section className="panel">
+            <div className="panel-heading">
+              <div className="section-label">
+                <span className="number-box">
+                  <TriangleAlert size={14} />
+                </span>
+                <h3>Flagged actions — verify before executing</h3>
+              </div>
+              <Badge tone="amber">{a.flagged_actions.length} flagged</Badge>
+            </div>
+            <div className="panel-body">
+              {a.flagged_actions.map((text, i) => (
+                <Notice key={i} tone="error">
+                  {text}
+                </Notice>
+              ))}
+            </div>
+          </section>
+        )}
         <section className="panel">
           <div className="panel-heading">
             <div className="section-label">
@@ -971,7 +1000,7 @@ function Analysis({ analysis: a, sample = false, compact = false }) {
         </section>
         <details className="panel details" open={compact || undefined}>
           <summary>
-            Conditional remediation & recovery
+            Conditional remediation &amp; recovery
             <ChevronRight size={16} />
           </summary>
           <List items={a.recommended_actions} />
@@ -994,7 +1023,7 @@ function Analysis({ analysis: a, sample = false, compact = false }) {
             </Badge>
             <p className="muted">
               {a.used_memory
-                ? "Historical context influenced this hypothesis. Verify it against today’s evidence."
+                ? "Historical context influenced this hypothesis. Verify it against today's evidence."
                 : "No historical source was cited in this recommendation."}
             </p>
             {a.warnings?.map((w, i) => (
@@ -1170,12 +1199,13 @@ function Comparison() {
       setBusy(false);
     }
   }
+  const diffKeys = result ? Object.keys(result.differences || {}) : [];
   return (
     <>
       <Heading
         eyebrow="MEMORY / CONTROLLED COMPARISON"
         title="See the difference memory makes."
-        description="Same incident. Same model and instructions. Only the retrieved history changes."
+        description="Same incident. Both runs use temperature 0 for consistency. Results can still vary between runs — use this as directional evidence, not a reproducible benchmark."
       />
       <details className="panel details" open={!result}>
         <summary>
@@ -1187,22 +1217,51 @@ function Comparison() {
       {busy && <Busy text="Running both analyses concurrently…" />}
       {error && <Notice tone="error">{error}</Notice>}
       {result && (
-        <div className="comparison-grid">
-          {[
-            ["without_memory", "Current evidence only"],
-            ["with_memory", "With operational memory"],
-          ].map(([key, title]) => (
-            <section key={key}>
-              <div className="comparison-title">
-                <h2>{title}</h2>
-                <Badge tone={key === "with_memory" ? "teal" : ""}>
-                  {key === "with_memory" ? "Hindsight enabled" : "Baseline"}
-                </Badge>
+        <>
+          {diffKeys.length > 0 && (
+            <section className="panel">
+              <div className="panel-heading">
+                <div>
+                  <h3>Where memory changed the answer</h3>
+                  <p>Fields where the two analyses produced different output.</p>
+                </div>
+                <Badge tone="teal">{diffKeys.length} difference{diffKeys.length !== 1 ? "s" : ""}</Badge>
               </div>
-              <Analysis compact analysis={result[key]} />
+              <div className="panel-body">
+                {diffKeys.map((field) => (
+                  <div className="diff-row" key={field}>
+                    <code>{field}</code>
+                    <div className="diff-values">
+                      <span className="muted">Without:</span>
+                      <p>{JSON.stringify(result.differences[field].without_memory)}</p>
+                      <span className="muted">With memory:</span>
+                      <p>{JSON.stringify(result.differences[field].with_memory)}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </section>
-          ))}
-        </div>
+          )}
+          {diffKeys.length === 0 && (
+            <Notice>Both analyses produced identical key fields. Memory did not change the diagnosis this time.</Notice>
+          )}
+          <div className="comparison-grid">
+            {[
+              ["without_memory", "Current evidence only"],
+              ["with_memory", "With operational memory"],
+            ].map(([key, title]) => (
+              <section key={key}>
+                <div className="comparison-title">
+                  <h2>{title}</h2>
+                  <Badge tone={key === "with_memory" ? "teal" : ""}>
+                    {key === "with_memory" ? "Hindsight enabled" : "Baseline"}
+                  </Badge>
+                </div>
+                <Analysis compact analysis={result[key]} />
+              </section>
+            ))}
+          </div>
+        </>
       )}
     </>
   );

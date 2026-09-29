@@ -329,7 +329,12 @@ def compare(
     data: ComparisonRequest,
     svc: IncidentService = Depends(get_incident_service),
 ):
-    return svc.compare_analysis(data.incident)
+    result = svc.compare_analysis(data.incident)
+    return ComparisonResponse(
+        without_memory=result["without_memory"],
+        with_memory=result["with_memory"],
+        differences=result.get("differences", {}),
+    )
 
 
 @app.get("/api/incidents/{incident_id}", response_model=Incident)

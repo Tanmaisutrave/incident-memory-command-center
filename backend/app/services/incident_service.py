@@ -28,7 +28,6 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
-from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 import sqlite3
 
@@ -422,10 +421,7 @@ class IncidentService:
 
     def compare_analysis(self, incident_data: IncidentCreate):
         incident = {"incident_id": "COMPARISON", **incident_data.model_dump(mode="json")}
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            without = pool.submit(self.analysis.analyze_incident, incident, False)
-            with_memory = pool.submit(self.analysis.analyze_incident, incident, True)
-            return {"without_memory": without.result(), "with_memory": with_memory.result()}
+        return self.analysis.compare_analysis(incident)
 
     def delete_incident(self, incident_id: str) -> None:
         with self._db() as db:

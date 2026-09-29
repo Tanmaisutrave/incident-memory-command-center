@@ -323,7 +323,13 @@ class AnalysisResponse(BaseModel):
     summary: str
     likely_root_cause: str
     confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+
+    # severity_assessment is now model-authored (Diagnosis.severity_assessment).
+    # The reporter's severity is stored on the Incident; this field reflects
+    # the model's independent assessment based on the evidence supplied.
     severity_assessment: Severity
+    # Human-readable reasoning for the model's severity choice.
+    severity_reasoning: str = ""
 
     historical_incidents: List[HistoricalIncident] = Field(default_factory=list)
     historical_evidence: List[str] = Field(default_factory=list)
@@ -338,6 +344,8 @@ class AnalysisResponse(BaseModel):
     used_memory: bool = True
     memory_status: str = "disabled"
     warnings: List[str] = Field(default_factory=list)
+    # Actions that matched the guardrail deny-list (text kept, engineer alerted).
+    flagged_actions: List[str] = Field(default_factory=list)
     timings_ms: Dict[str, float] = Field(default_factory=dict)
     evidence_assessment: str = "Unconfirmed hypothesis"
     disconfirming_checks: List[str] = Field(default_factory=list)
@@ -399,6 +407,7 @@ class ConnectionStatus(BaseModel):
 class ComparisonResponse(BaseModel):
     without_memory: AnalysisResponse
     with_memory: AnalysisResponse
+    differences: Dict[str, Any] = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -414,8 +423,12 @@ class Diagnosis(BaseModel):
     summary: str = Field(min_length=1, max_length=1500)
     likely_root_cause: str = Field(min_length=1, max_length=1500)
     evidence_assessment: str
-    investigation_steps: List[str] = Field(min_length=1, max_length=5)
-    recommended_actions: List[str] = Field(max_length=5)
+    # Model's independent severity assessment — must be one of P1/P2/P3/P4.
+    severity_assessment: Severity
+    # Model's reasoning for the chosen severity (one sentence is fine).
+    severity_reasoning: str = Field(min_length=1, max_length=500)
+    investigation_steps: List[str] = Field(min_length=1, max_length=3)
+    recommended_actions: List[str] = Field(max_length=3)
     disconfirming_checks: List[str] = Field(min_length=1, max_length=4)
     verification_steps: List[str] = Field(min_length=1, max_length=4)
     historical_evidence: List[str] = Field(max_length=5)
