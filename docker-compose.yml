@@ -1,0 +1,30 @@
+version: "3.9"
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    env_file:
+      - backend/.env
+    environment:
+      # Override ENVIRONMENT to production when deploying publicly;
+      # also set APP_API_KEY to a strong random string.
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+    volumes:
+      # Persist the SQLite incident database across container restarts.
+      - incident_data:/app/backend/data
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+
+volumes:
+  incident_data:
+    driver: local

@@ -1,479 +1,367 @@
-# API Guide - Incident Memory Agent
+# API Guide — Incident Memory Command Center
 
-Complete guide to using the Incident Memory Agent API.
+Generated from the FastAPI OpenAPI schema (app version **3.1.0**).  
+Base URL: `http://localhost:8000`
 
----
-
-## Base URL
-
-```
-http://localhost:8000
-```
+All `/api/*` routes except `/api/health` require the header `X-API-Key` when
+`APP_API_KEY` is set in the environment (required outside `ENVIRONMENT=development`).
 
 ---
 
-## Quick Start
+## Authentication
 
-### 1. Health Check
-
-Verify the system is healthy:
-
-```bash
-curl http://localhost:8000/api/health
+```
+X-API-Key: <your APP_API_KEY>
 ```
 
-Response:
+Missing or incorrect key → **401 Unauthorized** with `{ "detail": "...", "request_id": "..." }`.
+
+Every response includes `X-Request-ID` for log correlation.
+
+---
+
+## Error envelope
+
+All errors return JSON:
+
+```json
+{ "detail": "Human-readable message", "request_id": "uuid" }
+```
+
+| Status | Meaning |
+|--------|---------|
+| 400 | Request-validation error from the service layer (invalid state transition, etc.) |
+| 401 | Missing or invalid API key |
+| 404 | Resource not found |
+| 409 | Optimistic-concurrency conflict |
+| 413 | Request body exceeds 256 KB |
+| 422 | Pydantic schema validation failure |
+| 429 | Rate limit exceeded — includes `Retry-After` header |
+| 500 | Stored-data integrity error (never exposes field detail) |
+| 502 | Upstream provider error (Groq / Hindsight) |
+
+---
+
+## Endpoints
+
+### `GET /api/health`
+
+Returns configuration status. **No auth required.**
+
+**Response 200**
 ```json
 {
-  "status": "healthy",
-  "timestamp": "2026-09-27T...",
-  "hindsight_status": "healthy",
-  "groq_status": "healthy",
-  "version": "2.0.0"
+  "status": "ready | setup_required",
+  "groq_status": "configured | not_configured",
+  "hindsight_status": "configured | not_configured",
+  "bank_id": "incident-agent",
+  "model": "openai/gpt-oss-120b",
+  "note": "Configuration status only.",
+  "version": "3.1.0"
 }
 ```
 
 ---
 
-## Core Workflows
+### `GET /api/connections`
 
-### Workflow 1: Analyze a New Incident
+Checks live connectivity to Groq and Hindsight with a 6-second timeout each.
+Results are cached: 60 s for success, 10 s for failure.
 
-**Endpoint:** `POST /api/incidents/analyze`
+**Response 200**
+```json
+{ "groq": "connected | unavailable", "hindsight": "connected | unavailable" }
+```
 
-**Request:**
+---
+
+### `GET /api/incidents`
+
+Returns a paginated list of incidents ordered by creation time, newest first.
+
+**Query parameters**
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `limit` | integer | 200 | Max records to return |
+| `offset` | integer | 0 | Pagination offset |
+
+**Response 200** — array of `IncidentSummary` objects (no `symptoms`, `error_logs`, or `analysis`).
+
+---
+
+### `POST /api/incidents/analyze`
+
+Creates an incident and runs analysis in one call.
+
+**Request body** — `IncidentCreate`
+
+| Field | Type | Required | Constraints |
+|-------|------|----------|-------------|
+| `title` | string | ✓ | 5–500 chars |
+| `service` | string | ✓ | 2–100 chars |
+| `environment` | `production \| staging \| development` | ✓ | |
+| `severity` | `P1 \| P2 \| P3 \| P4` | ✓ | |
+| `symptoms` | string | ✓ | 10–12 000 chars |
+| `error_logs` | string | | max 20 000 chars |
+| `metrics` | object | | max 8 KB serialised |
+| `suspected_causes` | string[] | | max 10 items × 300 chars |
+| `tags` | string[] | | max 20 items × 50 chars |
+| `client_request_id` | string | | max 128 chars — idempotency key |
+
+Sending the same `client_request_id` twice returns the existing incident and
+re-runs analysis instead of creating a duplicate.
+
+**Response 200** — `AnalysisResponse`
+
 ```json
 {
-  "title": "Payment API High Latency",
-  "service": "payment-api",
-  "environment": "production",
-  "severity": "P1",
-  "symptoms": "API latency at 8 seconds, Redis timeout errors, 502 responses",
-  "error_logs": "RedisTimeoutError: timeout after 5000ms",
-  "metrics": {
-    "latency_p99": 8200,
-    "error_rate": 0.23
-  },
-  "suspected_causes": ["Redis connection pool exhaustion"],
-  "tags": ["redis", "performance"]
+  "incident_id": "INC-XXXXXXXX",
+  "summary": "...",
+  "likely_root_cause": "...",
+  "severity_assessment": "P2",
+  "severity_reasoning": "...",
+  "evidence_assessment": "...",
+  "investigation_steps": ["..."],
+  "recommended_actions": ["..."],
+  "disconfirming_checks": ["..."],
+  "verification_steps": ["..."],
+  "next_steps": "...",
+  "risk_notes": "...",
+  "historical_incidents": [...],
+  "historical_evidence": [...],
+  "memory_insights": [...],
+  "cited_sources": [...],
+  "used_memory": true,
+  "memory_status": "retrieved | empty | unavailable | disabled",
+  "warnings": [],
+  "flagged_actions": [],
+  "timings_ms": { "recall": 320, "model": 2100, "total": 2420 },
+  "analysis_timestamp": "2024-01-01T00:00:00Z"
 }
 ```
 
-**Response:**
+**Rate limit:** 5 requests / 60 s per IP.
+
+---
+
+### `POST /api/incidents/compare`
+
+Runs the same incident through two analysis branches simultaneously:
+one without historical memory and one with. Both use `temperature=0` for
+reproducibility. Results can still vary between runs.
+
+**Request body**
+```json
+{ "incident": { <same fields as IncidentCreate> } }
+```
+
+**Response 200**
 ```json
 {
-  "incident_id": "INC-1013",
-  "summary": "Payment API experiencing severe latency...",
-  "likely_root_cause": "Redis connection pool exhaustion...",
-  "confidence": 0.92,
-  "severity_assessment": "P1",
-  "historical_incidents": [
-    {
-      "memory_text": "INCIDENT: INC-1001 - Payment API Redis Timeout...",
-      "memory_type": "world"
+  "without_memory": { <AnalysisResponse> },
+  "with_memory":    { <AnalysisResponse> },
+  "differences": {
+    "likely_root_cause": {
+      "without_memory": "...",
+      "with_memory": "..."
     }
-  ],
-  "historical_evidence": [
-    "INC-1001: Redis pool exhaustion (100→250 connections)",
-    "INC-1006: Similar pattern during flash sale (250→400)"
-  ],
-  "memory_insights": [
-    "Two previous incidents with identical symptoms...",
-    "Both resolved by increasing connection pool size"
-  ],
-  "recommended_actions": [
-    "Check current Redis connection pool utilization",
-    "Verify connection pool is not at capacity",
-    "Consider increasing pool size based on usage"
-  ],
-  "investigation_steps": [
-    "1. Check Redis metrics and connection count",
-    "2. Review connection pool configuration",
-    "3. Analyze traffic patterns"
-  ],
-  "next_steps": "Start with: Check Redis connection pool utilization",
-  "risk_notes": "Similar to INC-1001 and INC-1006...",
-  "analysis_timestamp": "2026-09-27T...",
-  "used_memory": true
+  }
 }
 ```
 
-**Key Points:**
-- Historical incidents are automatically recalled from Hindsight
-- Analysis includes evidence from similar past incidents
-- Recommendations are informed by previous resolutions
-- Confidence score based on historical data quality
+**Rate limit:** 5 requests / 60 s per IP (counts as 2 tokens).
 
 ---
 
-### Workflow 2: Resolve an Incident
+### `GET /api/incidents/{incident_id}`
 
-**Endpoint:** `POST /api/incidents/{incident_id}/resolve`
+Returns the full `Incident` object including `symptoms`, `error_logs`, and `analysis`.
 
-**Request:**
+**Response 404** when the incident does not exist.
+
+---
+
+### `DELETE /api/incidents/{incident_id}`
+
+Deletes the local record and attempts to delete the remote memory document.
+The local delete always succeeds; remote failure is reported in the response.
+
+**Response 200**
 ```json
 {
-  "root_cause": "Redis connection pool exhausted at peak load",
-  "actions_taken": [
-    "Verified Redis health",
-    "Checked pool metrics - 100/100 in use",
-    "Increased pool from 100 to 250",
-    "Restarted application"
-  ],
-  "resolution": "Increased Redis connection pool size from 100 to 250",
-  "outcome": "Latency reduced from 8.2s to 1.1s, error rate dropped to 0%",
-  "before_metrics": {
-    "latency_p99": 8200,
-    "error_rate": 0.23,
-    "connections_used": 100
-  },
-  "after_metrics": {
-    "latency_p99": 1100,
-    "error_rate": 0,
-    "connections_used": 65
-  },
-  "downtime": 18,
-  "affected_users": 3500,
-  "lessons_learned": "Monitor connection pool proactively. Set alerts at 80% capacity.",
-  "preventive_actions": [
-    "Add connection pool monitoring",
-    "Set alerts at 80% utilization",
-    "Regular capacity planning"
-  ]
+  "incident_id": "INC-XXXXXXXX",
+  "deleted": true,
+  "memory_deleted": true,
+  "memory_note": "Memory document deleted."
 }
 ```
 
-**Response:**
+---
+
+### `POST /api/incidents/{incident_id}/analyze`
+
+Re-runs analysis on an existing incident. Only allowed when `status` is
+`reported` or `investigating`.
+
+**Response 200** — `AnalysisResponse`  
+**Response 400** — if in a terminal status  
+**Response 404** — incident not found
+
+**Rate limit:** 5 requests / 60 s per IP.
+
+---
+
+### `POST /api/incidents/{incident_id}/updates`
+
+Adds a human-reported update (evidence or failed attempt) to an incident.
+
+**Request body** — `IncidentUpdate`
+
+| Field | Type | Required | Constraints |
+|-------|------|----------|-------------|
+| `note` | string | ✓ | 10–5 000 chars |
+| `kind` | `evidence \| failed_attempt` | | default `evidence` |
+| `reopen` | boolean | | default `false` — required to update a resolved incident |
+
+Max 50 updates per incident.
+
+**Response 200** — full `Incident` with `memory_retained` updated.
+
+---
+
+### `POST /api/incidents/{incident_id}/resolve`
+
+Records an outcome and attempts to retain the incident in Hindsight memory.
+
+**Request body** — `ResolutionRequest`
+
+| Field | Type | Required | Constraints |
+|-------|------|----------|-------------|
+| `root_cause` | string | ✓ | 10–5 000 chars |
+| `resolution` | string | ✓ | 10–5 000 chars |
+| `actions_taken` | string[] | ✓ | 1–20 items × 1 000 chars |
+| `outcome` | `successfully_resolved \| partially_resolved \| unresolved_escalated` | ✓ | |
+| `lessons_learned` | string | | max 5 000 chars |
+| `preventive_actions` | string[] | | max 20 items |
+| `downtime` | float | | minutes |
+| `affected_users` | integer | | |
+| `before_metrics` | object | | max 8 KB |
+| `after_metrics` | object | | max 8 KB |
+
+**Response 200**
 ```json
 {
-  "incident_id": "INC-1013",
+  "incident_id": "INC-XXXXXXXX",
   "status": "resolved",
   "memory_retained": true,
-  "message": "Incident INC-1013 resolved and retained to memory"
-}
-```
-
-**What Happens:**
-1. Incident is marked as resolved
-2. Resolution details are stored
-3. Complete incident + resolution is retained to Hindsight
-4. Future incidents can now learn from this resolution
-
----
-
-### Workflow 3: Compare With/Without Memory
-
-**Endpoint:** `POST /api/incidents/compare`
-
-**Request:**
-```json
-{
-  "incident": {
-    "title": "Database Connection Timeout",
-    "service": "order-service",
-    "environment": "production",
-    "severity": "P1",
-    "symptoms": "Database queries timing out, connection pool exhausted"
-  }
-}
-```
-
-**Response:**
-```json
-{
-  "incident_id": "INC-1014",
-  "without_memory": {
-    "incident_id": "INC-1014",
-    "summary": "Generic database troubleshooting...",
-    "likely_root_cause": "Possible connection pool or network issues",
-    "confidence": 0.65,
-    "historical_incidents": [],
-    "recommended_actions": [
-      "Check database connectivity",
-      "Review network latency",
-      "Verify database health"
-    ]
-  },
-  "with_memory": {
-    "incident_id": "INC-1014",
-    "summary": "Similar to INC-1002 which was caused by...",
-    "likely_root_cause": "Connection pool exhaustion due to slow queries",
-    "confidence": 0.88,
-    "historical_incidents": [
-      { "memory_text": "INC-1002: Order Service Connection Exhaustion..." }
-    ],
-    "historical_evidence": [
-      "INC-1002: Slow queries holding connections",
-      "Resolution: Added index, increased pool size"
-    ],
-    "recommended_actions": [
-      "Identify slow queries holding connections",
-      "Review connection pool configuration",
-      "Check for missing database indexes"
-    ]
-  }
-}
-```
-
-**Use Case:** Demonstrates the value of memory to stakeholders and judges.
-
----
-
-## Memory Operations
-
-### Manual Memory Search
-
-**Endpoint:** `POST /api/memory/recall`
-
-**Request:**
-```json
-{
-  "query": "Redis connection pool exhaustion and timeouts",
-  "max_tokens": 4096,
-  "budget": "mid"
-}
-```
-
-**Response:**
-```json
-{
-  "query": "Redis connection pool exhaustion and timeouts",
-  "memories": [
-    {
-      "memory_text": "INCIDENT: INC-1001 - Payment API Redis Timeout...",
-      "memory_type": "world"
-    },
-    {
-      "memory_text": "INCIDENT: INC-1006 - Payment API Redis Timeout During Flash Sale...",
-      "memory_type": "world"
-    }
-  ],
-  "count": 2
-}
-```
-
-**Parameters:**
-- `budget`: "low", "mid", "high" - controls search depth/quality
-- `max_tokens`: maximum context size (100-10000)
-
----
-
-### Pattern Discovery (Reflection)
-
-**Endpoint:** `POST /api/memory/reflect`
-
-**Request:**
-```json
-{
-  "query": "What are the most common incident patterns and resolutions?",
-  "budget": "high"
-}
-```
-
-**Response:**
-```json
-{
-  "query": "What are the most common incident patterns and resolutions?",
-  "reflection": "Analysis of historical incidents reveals...\n\n1. Connection Pool Exhaustion (40% of incidents):\n   - Most common in Redis and PostgreSQL\n   - Resolution: Increase pool size + monitoring\n   - Services affected: payment-api, order-service\n\n2. Resource Saturation (25%):\n   - CPU, Memory, Disk issues\n   - Resolution: Optimization + scaling\n\n3. Network Issues (20%):\n   - Timeouts, latency spikes\n   - Resolution: Infrastructure fixes, fallbacks\n\n...",
-  "timestamp": "2026-09-27T..."
-}
-```
-
-**Use Cases:**
-- Identifying recurring patterns
-- Finding common root causes
-- Discovering successful resolution strategies
-- Generating operational insights
-
----
-
-## Information Retrieval
-
-### Get Incident Details
-
-**Endpoint:** `GET /api/incidents/{incident_id}`
-
-**Response:**
-```json
-{
-  "incident_id": "INC-1013",
-  "title": "Payment API High Latency",
-  "service": "payment-api",
-  "environment": "production",
-  "severity": "P1",
-  "status": "resolved",
-  "symptoms": "...",
-  "root_cause": "...",
-  "resolution": "...",
-  "outcome": "...",
-  "timestamp": "...",
-  "resolved_at": "..."
+  "message": "Outcome saved and memory retained."
 }
 ```
 
 ---
 
-### Get Related Memories
+### `POST /api/incidents/{incident_id}/retry-memory`
 
-**Endpoint:** `GET /api/incidents/{incident_id}/memories`
+Retries delivering the incident record to Hindsight memory.
+Requires at least one update or an outcome to be recorded.
 
-**Response:**
-```json
-{
-  "incident_id": "INC-1013",
-  "memories": [
-    {
-      "text": "INCIDENT: INC-1001...",
-      "type": "world"
-    }
-  ],
-  "count": 2
-}
-```
-
-Shows which historical incidents are related to this incident.
+**Response 200** — full `Incident`
 
 ---
 
-### Memory Statistics
+### `GET /api/incidents/{incident_id}/memories`
 
-**Endpoint:** `GET /api/memory/stats`
+Recalls historical incidents similar to this one from Hindsight.
 
-**Response:**
+**Response 200**
+```json
+{
+  "incident_id": "INC-XXXXXXXX",
+  "memories": [ { "text": "...", "type": "world", "source_id": "uuid" } ],
+  "count": 3
+}
+```
+
+---
+
+### `POST /api/memory/recall`
+
+Manual memory recall against a free-form query.
+
+**Request body**
+
+| Field | Type | Required | Constraints |
+|-------|------|----------|-------------|
+| `query` | string | ✓ | 5–3 000 chars |
+| `max_tokens` | integer | | 100–10 000, default 4 096 |
+| `budget` | `low \| mid \| high` | | default `mid` |
+
+**Response 200**
+```json
+{ "query": "...", "memories": [...], "count": 2 }
+```
+
+---
+
+### `POST /api/memory/reflect`
+
+Asks Hindsight to synthesise patterns across all retained incidents.
+
+**Request body**
+
+| Field | Type | Required | Constraints |
+|-------|------|----------|-------------|
+| `query` | string | ✓ | 10–3 000 chars |
+| `budget` | `low \| mid \| high` | | default `mid` |
+
+**Response 200**
+```json
+{ "query": "...", "reflection": "...", "timestamp": "..." }
+```
+
+**Rate limit:** 5 requests / 60 s per IP.
+
+---
+
+### `GET /api/memory/stats`
+
+Returns aggregate counters for the current session and the workspace.
+
+**Response 200**
 ```json
 {
   "bank_id": "incident-agent",
-  "total_recalls": 42,
-  "total_retains": 15,
-  "last_retain": "2026-09-27T...",
-  "last_recall": "2026-09-27T..."
+  "total_recalls": 12,
+  "total_retains": 4,
+  "last_retain": "2024-01-01T00:00:00",
+  "last_recall": "2024-01-01T00:00:00",
+  "total_incidents": 8,
+  "retained_incidents": 4,
+  "active_incidents": 2,
+  "scope": "Local incident records..."
 }
 ```
 
 ---
 
-## Data Models
+## Rate limits
 
-### Severity Levels
-- `P1` - Critical (production down)
-- `P2` - High (major functionality impaired)
-- `P3` - Medium (partial functionality impaired)
-- `P4` - Low (minor issue)
+| Route pattern | Limit | Cost |
+|---------------|-------|------|
+| `*/analyze`, `*/compare`, `*/reflect` | 5 / min | compare costs 2 |
+| All other POSTs | 30 / min | 1 |
+| GETs | 120 / min | 1 |
 
-### Environments
-- `production`
-- `staging`
-- `development`
-
-### Incident Status
-- `reported` - Initial state
-- `investigating` - Being analyzed
-- `diagnosed` - Root cause identified
-- `resolving` - Fix being applied
-- `resolved` - Fixed and retained to memory
-- `closed` - Archived
+Exceeded limits return **429** with `Retry-After` (seconds).
 
 ---
 
-## Error Responses
+## Memory status lifecycle
 
-### 404 Not Found
-```json
-{
-  "detail": "Incident INC-9999 not found"
-}
-```
-
-### 500 Internal Server Error
-```json
-{
-  "detail": "Analysis failed: Connection timeout"
-}
-```
-
-### 422 Validation Error
-```json
-{
-  "detail": [
-    {
-      "loc": ["body", "severity"],
-      "msg": "value is not a valid enumeration member",
-      "type": "type_error.enum"
-    }
-  ]
-}
-```
-
----
-
-## Best Practices
-
-### 1. Always Use Memory
-```json
-{
-  "use_memory": true  // Default and recommended
-}
-```
-
-Memory-informed analysis is the core value proposition.
-
-### 2. Provide Rich Context
-Include symptoms, error logs, metrics, and suspected causes for best results.
-
-### 3. Document Resolutions Thoroughly
-The more detail in resolutions, the more valuable the memory becomes for future incidents.
-
-### 4. Use Reflection Periodically
-Run reflection queries monthly to discover operational insights.
-
-### 5. Monitor Memory Statistics
-Track recall/retain counts to verify the agent is learning.
-
----
-
-## Interactive Documentation
-
-Visit http://localhost:8000/docs for interactive Swagger documentation where you can:
-- Try all endpoints
-- See request/response schemas
-- Test with your own data
-- Download OpenAPI spec
-
----
-
-## Python SDK Example
-
-```python
-import requests
-
-# Analyze incident
-response = requests.post(
-    "http://localhost:8000/api/incidents/analyze",
-    json={
-        "title": "API Timeout",
-        "service": "payment-api",
-        "environment": "production",
-        "severity": "P1",
-        "symptoms": "Timeout errors"
-    }
-)
-
-analysis = response.json()
-print(f"Root cause: {analysis['likely_root_cause']}")
-print(f"Confidence: {analysis['confidence']}")
-```
-
----
-
-## Support
-
-For issues or questions:
-- Check logs: Application logs show detailed information
-- Health check: Verify Hindsight and Groq connectivity
-- Documentation: See docs/ folder
-- Tests: Run scripts/test_agent.py
-
----
-
-**API Version:** 2.0.0  
-**Last Updated:** 2026-09-27
+| Value | Meaning |
+|-------|---------|
+| `not_recorded` | Retain was not attempted (e.g. non-production env blocked) |
+| `pending` | Accepted async (queued) — shown as "Queued" in the UI |
+| `accepted` | Accepted synchronously — shown as "Saved" |
+| `failed` | SDK returned failure or raised an exception |

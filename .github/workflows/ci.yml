@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "dev", "feature/**"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  # ─────────────────────────────── backend ────────────────────────────────
+  backend:
+    name: Backend — lint / test / audit
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+          pip install ruff pip-audit
+
+      - name: Ruff lint
+        run: ruff check app/ tests/ --output-format=github
+
+      - name: Ruff format check
+        run: ruff format app/ tests/ --check
+
+      - name: pytest (no live markers)
+        env:
+          ENVIRONMENT: development
+          GROQ_API_KEY: dummy
+          HINDSIGHT_API_KEY: dummy
+        run: pytest tests/ -q --tb=short -m "not live"
+
+      - name: pip-audit
+        run: pip-audit -r requirements.txt --format=markdown
+
+  # ─────────────────────────────── frontend ───────────────────────────────
+  frontend:
+    name: Frontend — build / test / audit
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Vitest
+        run: npm run test:run
+
+      - name: Production build
+        run: node build.mjs
+
+      - name: npm audit
+        run: npm audit --audit-level=high

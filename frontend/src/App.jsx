@@ -236,7 +236,7 @@ export default function App() {
           <div className="profile">
             <span className="avatar" aria-hidden="true">OC</span>
             <div>On-call engineer<small>Local workspace</small></div>
-            <Badge>v3.1</Badge>
+            <Badge>v{health?.version || "3.1"}</Badge>
           </div>
         </div>
       </aside>
