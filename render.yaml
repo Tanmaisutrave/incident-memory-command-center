@@ -1,0 +1,47 @@
+services:
+  - type: web
+    name: incident-memory-command-center
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    region: singapore
+    branch: main
+    autoDeploy: true
+    healthCheckPath: /api/health
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+      - key: HINDSIGHT_BASE_URL
+        value: https://api.hindsight.vectorize.io
+      - key: HINDSIGHT_BANK_ID
+        value: incident-agent
+      - key: GROQ_MODEL
+        value: openai/gpt-oss-120b
+      - key: GROQ_MAX_TOKENS
+        value: "4000"
+      - key: MEMORY_REDACTION
+        value: "true"
+      - key: RECALL_SAME_ENV_ONLY
+        value: "true"
+      - key: MAX_CONCURRENT_CALLS
+        value: "4"
+      - key: WEB_CONCURRENCY
+        value: "1"
+      # Secrets — enter in the Render dashboard.
+      - key: GROQ_API_KEY
+        sync: false
+      - key: HINDSIGHT_API_KEY
+        sync: false
+      # Set APP_API_KEY and VITE_API_KEY to the SAME random value
+      # (python -c "import secrets; print(secrets.token_hex(32))").
+      - key: APP_API_KEY
+        sync: false
+      - key: VITE_API_KEY
+        sync: false
+      # Set both to https://<service>.onrender.com after the first deploy.
+      - key: FRONTEND_URL
+        sync: false
+      - key: BACKEND_URL
+        sync: false

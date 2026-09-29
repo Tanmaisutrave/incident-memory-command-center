@@ -74,3 +74,6 @@ out/
 *.tmp
 *.temp
 .cache/
+
+# Local tool config
+.kiro/

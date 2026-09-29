@@ -301,3 +301,13 @@ npm run test:run
 ## License
 
 MIT — see `LICENSE` if present.
+
+## Deploy to Render
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Tanmaisutrave/incident-memory-command-center)
+
+1. Click the button (or Dashboard → New → Blueprint → pick this repo). `render.yaml` defines a single Docker web service that serves both the API and the built frontend.
+2. Fill in `GROQ_API_KEY`, `HINDSIGHT_API_KEY`, and set `APP_API_KEY` and `VITE_API_KEY` to the same random value.
+3. After the first deploy, set `FRONTEND_URL` and `BACKEND_URL` to your `https://<service>.onrender.com` URL and redeploy.
+
+Note: the free plan has no persistent disk, so the SQLite data in `backend/data` resets on each redeploy. On a paid plan, attach a disk at `/app/backend/data`.

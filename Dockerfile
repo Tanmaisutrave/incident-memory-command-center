@@ -6,6 +6,11 @@ COPY frontend/package*.json ./
 RUN npm ci --legacy-peer-deps
 
 COPY frontend/ ./
+# Render passes service env vars as build args. The key is embedded in the
+# public bundle, so it only gates casual abuse; rate limits still apply.
+ARG VITE_API_KEY=""
+ARG VITE_API_BASE_URL=""
+ENV VITE_API_KEY=$VITE_API_KEY VITE_API_BASE_URL=$VITE_API_BASE_URL
 # node build.mjs calls vite build; output goes to frontend/dist
 RUN node build.mjs
 
@@ -40,11 +45,7 @@ USER appuser
 
 EXPOSE 8000
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-  CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3   CMD python -c "import os, urllib.request; urllib.request.urlopen('http://localhost:%s/api/health' % os.environ.get('PORT', '8000'))"
 
-CMD ["python", "-m", "uvicorn", "app.main:app", \
-     "--app-dir", "backend", \
-     "--host", "0.0.0.0", \
-     "--port", "8000", \
-     "--workers", "2"]
+# Render (and most PaaS hosts) inject $PORT; default to 8000 locally.
+CMD ["sh", "-c", "python -m uvicorn app.main:app --app-dir backend --host 0.0.0.0 --port ${PORT:-8000} --workers ${WEB_CONCURRENCY:-1}"]
