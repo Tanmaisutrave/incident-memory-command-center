@@ -56,7 +56,10 @@ class MemoryService:
                 suspected_causes=suspected_causes
             )
             
-            logger.info(f"Recalling memories with query: {query[:100]}...")
+            logger.info(
+                "Recalling memories for service=%r env=%r symptoms_len=%d error_logs_len=%d",
+                service, environment, len(symptoms or ""), len(error_logs or ""),
+            )
             
             # Recall from Hindsight
             memories = self.hindsight.recall(
@@ -69,7 +72,7 @@ class MemoryService:
             self.recall_count += 1
             self.last_recall = datetime.utcnow()
             
-            logger.info(f"Recalled {len(memories)} historical incidents")
+            logger.info("Recalled %d historical incidents", len(memories))
             return memories
             
         except Exception as e:
@@ -109,7 +112,7 @@ class MemoryService:
             # Build context
             context = f"Reported outcome {resolution.get('outcome')} for {incident.get('service')} in {incident.get('environment')}"
             
-            logger.info(f"Retaining incident {incident.get('incident_id')} to memory")
+            logger.info("Retaining incident %s to memory", incident.get("incident_id"))
             
             # Retain to Hindsight
             result = self.hindsight.retain(
@@ -123,7 +126,7 @@ class MemoryService:
                 self.retain_count += 1
                 self.last_retain = datetime.utcnow()
             
-            logger.info(f"Successfully retained incident {incident.get('incident_id')}")
+            logger.info("Successfully retained incident %s", incident.get("incident_id"))
             return result.get("success", False)
             
         except Exception as e:
@@ -146,7 +149,7 @@ class MemoryService:
             Reflection insights
         """
         try:
-            logger.info(f"Reflecting on patterns: {query[:100]}...")
+            logger.info("Reflecting on patterns: query_len=%d", len(query))
             
             reflection = self.hindsight.reflect(
                 query=query,

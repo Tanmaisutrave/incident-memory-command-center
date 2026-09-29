@@ -444,7 +444,8 @@ def test_delete_incident(tmp_path):
 
 def test_delete_nonexistent_raises(tmp_path):
     svc = make_svc(tmp_path)
-    with pytest.raises(ValueError, match='not found'):
+    from app.schemas import NotFoundError as _NFE
+    with pytest.raises(_NFE, match='not found'):
         svc.delete_incident('INC-DOESNOTEXIST')
 
 
