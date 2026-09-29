@@ -34,6 +34,15 @@ class IncidentStatus(str, Enum):
     ESCALATED = "escalated"
 
 
+# Statuses that are considered terminal (no automatic transition away from them).
+TERMINAL_STATUSES = frozenset({
+    IncidentStatus.RESOLVED,
+    IncidentStatus.CLOSED,
+    IncidentStatus.MITIGATED,
+    IncidentStatus.ESCALATED,
+})
+
+
 class IncidentCreate(BaseModel):
     """Schema for creating a new incident."""
     title: str = Field(..., min_length=5, max_length=500)
@@ -56,31 +65,32 @@ class Incident(BaseModel):
     severity: Severity
     status: IncidentStatus = IncidentStatus.REPORTED
     timestamp: datetime = Field(default_factory=datetime.utcnow)
-    
+
     # Initial information
     symptoms: str
     error_logs: Optional[str] = None
     metrics: Optional[Dict[str, Any]] = None
     suspected_causes: Optional[List[str]] = None
     tags: Optional[List[str]] = None
-    
+
     # Diagnosis (filled after analysis)
     root_cause: Optional[str] = None
     actions_taken: Optional[List[str]] = None
     resolution: Optional[str] = None
-    
+
     # Outcome (filled after resolution)
     outcome: Optional[str] = None
     downtime: Optional[float] = None  # in minutes
     affected_users: Optional[int] = None
     lessons_learned: Optional[str] = None
+    preventive_actions: Optional[List[str]] = None
     before_metrics: Optional[Dict[str, Any]] = None
     after_metrics: Optional[Dict[str, Any]] = None
     resolved_at: Optional[datetime] = None
     memory_retained: bool = False
     analysis: Optional[Dict[str, Any]] = None
     updates: List[Dict[str, Any]] = Field(default_factory=list)
-    
+
     class Config:
         from_attributes = True
         json_schema_extra = {
@@ -92,9 +102,25 @@ class Incident(BaseModel):
                 "severity": "P1",
                 "symptoms": "API latency increased to 8.2 seconds, Redis timeout errors",
                 "error_logs": "RedisTimeoutError: Timeout connecting to Redis",
-                "metrics": {"latency_p99": 8200, "error_rate": 0.23}
+                "metrics": {"latency_p99": 8200, "error_rate": 0.23},
             }
         }
+
+
+class IncidentSummary(BaseModel):
+    """Lightweight projection used in list endpoints (omits heavy fields)."""
+    incident_id: str
+    title: str
+    service: str
+    environment: Environment
+    severity: Severity
+    status: IncidentStatus
+    timestamp: datetime
+    resolved_at: Optional[datetime] = None
+    memory_retained: bool = False
+    outcome: Optional[str] = None
+    updates: List[Dict[str, Any]] = Field(default_factory=list)
+    tags: Optional[List[str]] = None
 
 
 class HistoricalIncident(BaseModel):
@@ -112,18 +138,18 @@ class AnalysisResponse(BaseModel):
     likely_root_cause: str
     confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     severity_assessment: Severity
-    
+
     # Historical context
     historical_incidents: List[HistoricalIncident] = Field(default_factory=list)
     historical_evidence: List[str] = Field(default_factory=list)
     memory_insights: List[str] = Field(default_factory=list)
-    
+
     # Recommendations
     recommended_actions: List[str]
     investigation_steps: List[str]
     next_steps: str
     risk_notes: Optional[str] = None
-    
+
     # Metadata
     analysis_timestamp: datetime = Field(default_factory=datetime.utcnow)
     used_memory: bool = True
@@ -212,6 +238,7 @@ class ComparisonRequest(BaseModel):
 class IncidentUpdate(BaseModel):
     note: str = Field(..., min_length=10, max_length=5000)
     kind: Literal['evidence', 'failed_attempt'] = 'evidence'
+    reopen: bool = False
 
 
 class Diagnosis(BaseModel):
