@@ -14,6 +14,7 @@ Requires Python 3.11+ and Node.js 20+.
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r backend/requirements.txt
+.\.venv\Scripts\python.exe -m pip install -r backend/requirements-dev.txt
 Copy-Item backend/.env.example backend/.env
 cd frontend
 npm ci
@@ -49,6 +50,7 @@ These are model-generated hypotheses for human review, not automatic remediation
 ## Verify
 
 ```powershell
+.\.venv\Scripts\python.exe -m pip install -r backend/requirements-dev.txt
 .\.venv\Scripts\python.exe -m pytest backend/tests -q -p no:cacheprovider
 cd frontend
 npm run build

@@ -1,6 +1,11 @@
 """
 Quick integration test for the Incident Memory Agent.
 
+NOTE: This is a manual integration test. It requires a running server and
+valid API keys (GROQ_API_KEY, HINDSIGHT_API_KEY) in backend/.env.
+Run the backend first with `./run.ps1`, then execute this script directly:
+`python scripts/manual/test_agent.py`
+
 This script tests the core agent workflows:
 1. Seeding memory with incidents
 2. Analyzing new incidents with memory

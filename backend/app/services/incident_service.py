@@ -19,7 +19,7 @@ class IncidentService:
         with self._db() as db:
             db.execute('CREATE TABLE IF NOT EXISTS incidents (id TEXT PRIMARY KEY, payload TEXT NOT NULL)')
         # Import the original checkout's JSON once, without modifying it.
-        legacy = Path(__file__).resolve().parents[2] / 'backend/data/incidents/incidents.json'
+        legacy = Path(__file__).resolve().parents[2] / 'seed' / 'legacy_incidents.json'
         if db_path is None and legacy.exists():
             records = json.loads(legacy.read_text(encoding='utf-8')).get('incidents', [])
             with self._db() as db:

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+﻿import { useEffect, useState } from "react";
 import {
   Activity,
   ArrowDown,
@@ -1179,7 +1179,7 @@ function Comparison() {
       />
       <details className="panel details" open={!result}>
         <summary>
-          Incident input � edit and run comparison
+          Incident input — edit and run comparison
           <ChevronRight size={16} />
         </summary>
         <IncidentForm compare onSubmit={run} busy={busy} />

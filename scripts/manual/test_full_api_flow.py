@@ -1,4 +1,9 @@
-"""Test the complete API flow for incident analysis."""
+"""Test the complete API flow for incident analysis.
+
+NOTE: This is a manual integration test. It requires a running server at
+http://127.0.0.1:8000. Run the backend first with `./run.ps1`, then execute
+this script directly: `python scripts/manual/test_full_api_flow.py`
+"""
 
 import requests
 import json

@@ -23,6 +23,8 @@ MANIFEST
 venv/
 .venv/
 backend/data/
+# Seed folder: legacy_incidents.json is tracked; ignore anything generated here.
+backend/seed/*.sqlite3
 ENV/
 env/
 
