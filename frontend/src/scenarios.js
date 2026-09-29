@@ -1,3 +1,12 @@
+/**
+ * scenarios.js — Synthetic demo incidents.
+ *
+ * Each scenario sets only the fields present in the incident form
+ * (title, service, environment, severity, symptoms, error_logs).
+ * `measurements` is stored separately as a read-only display string
+ * so it can be shown in the form without being submitted as `metrics`.
+ */
+
 export const scenarios = [
   {
     name: "Recurring Redis timeout",
@@ -8,7 +17,8 @@ export const scenarios = [
     symptoms:
       "Checkout p99 latency rose to 7.5 seconds. Redis calls time out and 18% of requests return 502. Pool utilization is 100%, active connections 100/100. No recent deployment.",
     error_logs: "RedisTimeoutError: timeout after 5000ms; pool_wait_ms=4800",
-    metrics: { latency_p99_ms: 7500, error_rate: 0.18, pool_utilization: 1 },
+    // display-only; not submitted to the backend
+    measurements: '{ "latency_p99_ms": 7500, "error_rate": 0.18, "pool_utilization": 1 }',
   },
   {
     name: "Same symptom, new cause",
@@ -20,7 +30,7 @@ export const scenarios = [
       "Redis timeouts returned after a network change. Pool utilization is 28% (70/250), Redis CPU is 22%, packet loss to Redis is 12%. The old pool-size increase has already been applied. Do not assume the historical cause is current.",
     error_logs:
       "RedisTimeoutError: timeout after 5000ms; packet_loss=12%; pool_wait_ms=2",
-    metrics: { pool_utilization: 0.28, packet_loss: 0.12 },
+    measurements: '{ "pool_utilization": 0.28, "packet_loss": 0.12 }',
   },
   {
     name: "Unfamiliar TLS failure",
@@ -31,11 +41,17 @@ export const scenarios = [
     symptoms:
       "All calls to the partner endpoint started failing with certificate expiration errors at midnight. Internal APIs are healthy. No database timeouts are observed.",
     error_logs: "SSLCertVerificationError: certificate has expired",
+    measurements: null,
   },
 ];
+
+/** Fields that live on the incident form (not measurements). */
+export const FORM_FIELDS = ["title", "service", "environment", "severity", "symptoms", "error_logs"];
+
 export const sampleAnalysis = {
   incident_id: "SAMPLE-ONLY",
   severity_assessment: "P1",
+  severity_reasoning: "P1 — production checkout completely impaired.",
   summary:
     "Redis timeouts coincide with exhausted client connections. Verify pool wait time before changing capacity.",
   likely_root_cause:
@@ -66,6 +82,7 @@ export const sampleAnalysis = {
   memory_status: "retrieved",
   timings_ms: {},
   warnings: [],
+  flagged_actions: [],
   risk_notes:
     "A larger pool can overload Redis. Confirm headroom and watch server connections.",
   historical_incidents: [

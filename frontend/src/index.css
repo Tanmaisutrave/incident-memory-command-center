@@ -1286,3 +1286,115 @@ textarea::placeholder {
     transition: none !important;
   }
 }
+
+/* ── New badge tones for mitigated / escalated / queued memory ── */
+.badge.purple {
+  background: #271d36;
+  border-color: #4e3772;
+  color: #c4a3f0;
+}
+.badge.blue {
+  background: #182236;
+  border-color: #2a4066;
+  color: #89b8f2;
+}
+.badge.grey {
+  background: #1a2230;
+  border-color: #303d50;
+  color: #9db3c8;
+}
+
+/* ── Diff rows in comparison panel ── */
+.diff-row {
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+}
+.diff-row:last-child {
+  border-bottom: 0;
+  margin-bottom: 0;
+}
+.diff-row > code {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 10px;
+  color: var(--accent);
+}
+.diff-values {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  font-size: 11px;
+}
+.diff-values p {
+  color: #c4d7e8;
+  word-break: break-word;
+  line-height: 1.6;
+}
+
+/* ── Measurements read-only box ── */
+.measurements-box {
+  background: #0b131c;
+  border: 1px solid #2a3d52;
+  border-radius: 5px;
+  padding: 10px 12px;
+  font-family: Consolas, monospace;
+  font-size: 10px;
+  color: #b7d9c7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin-top: 4px;
+}
+
+/* ── Memory status chips ── */
+.memory-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 9px;
+}
+
+/* ── Delete / reopen confirm dialog overlay ── */
+.confirm-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: #2e1b24;
+  border: 1px solid #6e3444;
+  border-radius: 6px;
+  font-size: 11px;
+  color: #f1a5b5;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.confirm-bar > span {
+  flex: 1;
+}
+
+/* ── Per-panel error notice ── */
+.panel-error {
+  padding: 12px 20px;
+  font-size: 11px;
+  color: #f1a5b5;
+  background: #2e1b24;
+  border-top: 1px solid #6e3444;
+}
+
+/* ── live-dot for sidebar ── */
+.live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* ── Accessibility: focus ring for details/summary cards ── */
+.source-card summary:focus-visible,
+.details summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 3px;
+}
