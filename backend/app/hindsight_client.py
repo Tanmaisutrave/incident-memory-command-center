@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import threading
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -56,7 +57,24 @@ class HindsightClient:
 
     def __init__(self) -> None:
         self.bank_id: str = settings.hindsight_bank_id
-        self._client = None  # lazy; created on first use
+        # The SDK's sync wrapper runs on the calling thread's event loop and its
+        # aiohttp session is bound to that loop, so one shared client breaks
+        # when FastAPI's threadpool calls it from a different thread. Keep one
+        # client per thread instead; ``_override`` lets tests inject a fake.
+        self._local = threading.local()
+        self._override = None
+
+    @property
+    def _client(self):
+        if self._override is not None:
+            return self._override
+        return getattr(self._local, "client", None)
+
+    @_client.setter
+    def _client(self, value) -> None:
+        self._override = value
+        if value is None:
+            self._local = threading.local()
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -70,7 +88,7 @@ class HindsightClient:
             )
         if self._client is None:
             from hindsight_client import Hindsight
-            self._client = Hindsight(
+            self._local.client = Hindsight(
                 base_url=settings.hindsight_base_url,
                 api_key=settings.hindsight_api_key,
                 timeout=35,
