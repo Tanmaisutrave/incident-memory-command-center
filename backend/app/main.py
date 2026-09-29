@@ -55,6 +55,13 @@ from app.services.incident_service import IncidentService
 from app.services.memory_service import memory_service
 from app.hindsight_client import hindsight_client
 from app.llm import llm_client
+from app.security import (
+    APIKeyMiddleware,
+    BodySizeLimitMiddleware,
+    RateLimitMiddleware,
+    SecurityHeadersMiddleware,
+    check_startup_safety,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -119,11 +126,26 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.add_middleware(RequestIDMiddleware)
+# SecurityHeaders wraps everything — applied after auth/rate checks
+app.add_middleware(SecurityHeadersMiddleware)
+# Body size must be checked before auth so we don't hold open huge streams
+app.add_middleware(BodySizeLimitMiddleware)
+# Rate limiting after auth (no point rate-limiting unauthenticated traffic differently)
+app.add_middleware(RateLimitMiddleware)
+# Auth checked first (outermost functional guard)
+app.add_middleware(APIKeyMiddleware)
+
+# CORS: origins come exclusively from settings — no hard-coded localhost in production.
+_cors_origins = [settings.frontend_url]
+if settings.environment.lower() == "development":
+    # Convenience: also allow the common Vite dev ports in development
+    _cors_origins += ["http://localhost:5173", "http://127.0.0.1:5173"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.frontend_url, "http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=_cors_origins,
     allow_methods=["GET", "POST", "DELETE"],
-    allow_headers=["Content-Type", _REQUEST_ID_HEADER],
+    allow_headers=["Content-Type", _REQUEST_ID_HEADER, "X-API-Key"],
     expose_headers=[_REQUEST_ID_HEADER],
 )
 

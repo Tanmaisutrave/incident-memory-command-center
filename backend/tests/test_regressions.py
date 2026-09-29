@@ -24,6 +24,21 @@ from app.schemas import (
 from app.services.analysis_service import AnalysisService
 from app.services.incident_service import ConflictError, IncidentService
 
+
+# ---------------------------------------------------------------------------
+# Force development mode so auth middleware bypasses in all regression tests.
+# ---------------------------------------------------------------------------
+@pytest.fixture(autouse=True)
+def _force_dev_mode():
+    from app.config import settings
+    original = settings.environment
+    settings.environment = "development"
+    original_key = settings.app_api_key
+    settings.app_api_key = ""
+    yield
+    settings.environment = original
+    settings.app_api_key = original_key
+
 # ---------------------------------------------------------------------------
 # Shared fixtures / helpers
 # ---------------------------------------------------------------------------

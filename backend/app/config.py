@@ -27,6 +27,26 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     # ---------------------------------------------------------------------------
+    # API security
+    # ---------------------------------------------------------------------------
+
+    # Required when ENVIRONMENT != development AND host is not loopback.
+    # Set to a long random string (e.g. `openssl rand -hex 32`).
+    app_api_key: str = ""
+
+    # ---------------------------------------------------------------------------
+    # Rate limiting / concurrency / call budgets
+    # ---------------------------------------------------------------------------
+
+    # Maximum simultaneous LLM + Hindsight calls (semaphore capacity).
+    max_concurrent_calls: int = 4
+
+    # 0 = disabled. Set to a positive integer to cap expensive (analyze/compare/
+    # reflect) calls per calendar day or month.
+    max_daily_calls: int = 0
+    max_monthly_calls: int = 0
+
+    # ---------------------------------------------------------------------------
     # Memory / retain settings
     # ---------------------------------------------------------------------------
 

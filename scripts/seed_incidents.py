@@ -337,11 +337,11 @@ LESSONS LEARNED:
                 context=f"Historical incident for {incident['service']}"
             )
             
-            if result.get('success'):
+            if result.get('accepted'):
                 print(f"  ✓ {incident['incident_id']} retained successfully")
                 success_count += 1
             else:
-                print(f"  ✗ {incident['incident_id']} failed to retain")
+                print(f"  ✗ {incident['incident_id']} failed to retain (accepted=False)")
                 failed_count += 1
                 
         except Exception as e:
@@ -360,5 +360,26 @@ LESSONS LEARNED:
 
 
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Seed Hindsight with synthetic incident data."
+    )
+    parser.add_argument(
+        "--confirm",
+        action="store_true",
+        help="Required flag: confirms you want to write to the memory bank.",
+    )
+    args = parser.parse_args()
+
+    print(f"\nTarget bank id : {hindsight_client.bank_id}")
+    print(f"Incidents to seed: {len(INCIDENTS)}")
+
+    if not args.confirm:
+        print(
+            "\nAdd --confirm to proceed. This writes data to the memory bank shown above.\n"
+        )
+        sys.exit(1)
+
     success = seed_incidents()
     sys.exit(0 if success else 1)

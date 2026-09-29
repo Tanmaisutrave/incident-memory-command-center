@@ -1,22 +1,39 @@
 # Web Framework
-fastapi==0.115.0
-uvicorn[standard]==0.32.0
+# fastapi>=0.115.12 bundles starlette>=1.3.1 which fixes multiple CVEs:
+#   CVE-2026-54283/54282 (request.form limits bypass, path authority manipulation)
+#   CVE-2026-48710 (Host header path injection)
+#   CVE-2026-48818/48817 (Windows SSRF/method-dispatch via StaticFiles/HTTPEndpoint)
+#   CVE-2024-47874 (multipart form field size unbounded DoS)
+fastapi==0.115.12
+uvicorn[standard]==0.34.3
 
 # AI/LLM
-groq==0.11.0
+# groq 1.x is a major-version bump; API interface is compatible for our usage
+# (chat.completions.create, models.list remain stable)
+groq==1.7.0
 
 # Hindsight Memory
 hindsight-client==0.9.0
 
 # Data validation
-pydantic==2.9.2
-pydantic-settings==2.5.2
+pydantic==2.11.7
+pydantic-settings==2.10.1
 
 # Environment
-python-dotenv==1.0.1
+# python-dotenv 1.2.2 fixes CVE-2026-28684 (symlink-follow on set_key)
+python-dotenv==1.2.2
 
 # HTTP client
-httpx==0.27.2
+httpx==0.28.1
 
 # Utilities
 python-dateutil==2.9.0
+
+# python-multipart 0.0.31 fixes multiple DoS CVEs:
+#   CVE-2024-53981 (boundary preamble DoS)
+#   CVE-2026-53538/53539 (querystring semicolon separator smuggling / O(n²))
+#   CVE-2026-53540 (negative Content-Length)
+#   CVE-2026-40347 (epilogue DoS)
+#   CVE-2026-42561 (header size unbounded DoS)
+# Pulled in transitively by fastapi; pin explicitly to ensure patched version.
+python-multipart==0.0.31

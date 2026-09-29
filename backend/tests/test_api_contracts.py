@@ -41,6 +41,21 @@ from app.schemas import (
 from app.services.analysis_service import AnalysisService
 from app.services.incident_service import IncidentService
 
+
+# ---------------------------------------------------------------------------
+# Force development mode for this entire module so auth middleware bypasses.
+# ---------------------------------------------------------------------------
+@pytest.fixture(autouse=True)
+def _force_dev_mode():
+    from app.config import settings
+    original = settings.environment
+    settings.environment = "development"
+    original_key = settings.app_api_key
+    settings.app_api_key = ""
+    yield
+    settings.environment = original
+    settings.app_api_key = original_key
+
 # ---------------------------------------------------------------------------
 # Shared fixtures / helpers
 # ---------------------------------------------------------------------------
