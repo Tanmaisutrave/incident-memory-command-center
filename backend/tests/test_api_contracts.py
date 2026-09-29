@@ -96,8 +96,9 @@ def _make_svc(tmp_path, analysis_svc=None, memory_svc=None):
     )
     if memory_svc is None:
         svc.memory = SimpleNamespace(
-            retain_resolved_incident=Mock(return_value=False),
-            hindsight=SimpleNamespace(retain=Mock(return_value={"success": False})),
+            retain_resolved_incident=Mock(return_value="failed"),
+            retain_incident=Mock(return_value="failed"),
+            delete_incident_memory=Mock(return_value=True),
             recall_similar_incidents=Mock(return_value=[]),
         )
     return svc
@@ -458,7 +459,6 @@ class TestValidationLimits:
         """Adding the 51st update raises 400 (ValueError from service)."""
         from app.schemas import MAX_UPDATES_PER_INCIDENT
         svc = _make_svc(tmp_path)
-        svc.memory.hindsight.retain.return_value = {"success": False}
         item = svc.create_incident(IncidentCreate(**INCIDENT))
 
         # Fill up to the cap directly on the model
@@ -750,6 +750,8 @@ class TestResponseModels:
             body = resp.json()
             assert body["incident_id"] == item.incident_id
             assert body["deleted"] is True
+            assert "memory_deleted" in body
+            assert "memory_note" in body
         finally:
             main.app.dependency_overrides.pop(main.get_incident_service, None)
 

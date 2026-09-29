@@ -138,7 +138,10 @@ def test_current_updates_reach_model():
 
 def test_resolution_delivery_and_restart(tmp_path):
     svc = make_svc(tmp_path)
-    svc.memory = SimpleNamespace(retain_resolved_incident=Mock(return_value=False))
+    svc.memory = SimpleNamespace(
+        retain_resolved_incident=Mock(return_value='failed'),
+        delete_incident_memory=Mock(return_value=True),
+    )
     item = svc.create_incident(IncidentCreate(**INCIDENT))
     result = svc.resolve_incident(item.incident_id, ResolutionRequest(**RESOLUTION))
     assert not result.memory_retained and result.status == IncidentStatus.RESOLVED
@@ -152,7 +155,10 @@ def test_resolution_delivery_and_restart(tmp_path):
 ])
 def test_unsuccessful_outcome_not_resolved(tmp_path, outcome, status):
     svc = make_svc(tmp_path)
-    svc.memory = SimpleNamespace(retain_resolved_incident=Mock(return_value=True))
+    svc.memory = SimpleNamespace(
+        retain_resolved_incident=Mock(return_value='accepted'),
+        delete_incident_memory=Mock(return_value=True),
+    )
     item = svc.create_incident(IncidentCreate(**INCIDENT))
     result = svc.resolve_incident(item.incident_id, ResolutionRequest(**{**RESOLUTION, 'outcome': outcome}))
     assert result.status.value == status and result.resolved_at is None
@@ -160,8 +166,12 @@ def test_unsuccessful_outcome_not_resolved(tmp_path, outcome, status):
 
 def test_update_saved_when_memory_is_down(tmp_path):
     svc = make_svc(tmp_path)
-    retain = Mock(side_effect=RuntimeError('offline'))
-    svc.memory = SimpleNamespace(hindsight=SimpleNamespace(retain=retain))
+    # retain_incident raises → MemoryService.retain_incident catches and returns 'failed'
+    retain_incident = Mock(side_effect=RuntimeError('offline'))
+    svc.memory = SimpleNamespace(
+        retain_incident=retain_incident,
+        delete_incident_memory=Mock(return_value=False),
+    )
     item = svc.create_incident(IncidentCreate(**INCIDENT))
     # Give it a prior analysis to confirm it gets cleared
     inc, ver = svc._require_with_version(item.incident_id)
@@ -176,10 +186,9 @@ def test_update_saved_when_memory_is_down(tmp_path):
     assert len(result.updates) == 1
     assert result.analysis is None
 
-    retain.side_effect = None
-    retain.return_value = {'success': True}
+    retain_incident.side_effect = None
+    retain_incident.return_value = 'accepted'
     assert svc.retry_memory(item.incident_id).memory_retained
-    assert retain.call_args.kwargs['document_id'] == item.incident_id
 
 
 def test_compare_parallel_and_no_persisted_incident(tmp_path):
@@ -202,7 +211,10 @@ def test_api_contracts_and_error_delivery(tmp_path, monkeypatch):
     from app import main
 
     svc = make_svc(tmp_path, analysis_svc=analyzer())
-    svc.memory = SimpleNamespace(retain_resolved_incident=Mock(return_value=False))
+    svc.memory = SimpleNamespace(
+        retain_resolved_incident=Mock(return_value='failed'),
+        delete_incident_memory=Mock(return_value=True),
+    )
 
     # Override the FastAPI dependency so the lifespan service is bypassed.
     main.app.dependency_overrides[main.get_incident_service] = lambda: svc
@@ -223,19 +235,41 @@ def test_api_contracts_and_error_delivery(tmp_path, monkeypatch):
         main.app.dependency_overrides.pop(main.get_incident_service, None)
 
 
-def test_hindsight_acknowledgement_and_client_cleanup(monkeypatch):
-    from app import hindsight_client as module
-    from unittest.mock import MagicMock
-    client = MagicMock()
-    client.__enter__.return_value = client
-    monkeypatch.setattr(module.settings, 'hindsight_api_key', 'test-key')
-    monkeypatch.setattr(module, 'Hindsight', Mock(return_value=client))
-    wrapper = module.HindsightClient()
-    client.retain.return_value = SimpleNamespace(success=True, var_async=True)
-    assert wrapper.retain('synthetic')['success'] is False
-    client.retain.return_value = SimpleNamespace(success=True, var_async=False)
-    assert wrapper.retain('synthetic')['success'] is True
-    assert client.__exit__.call_count == 2
+def test_hindsight_retain_result_shape(monkeypatch):
+    """HindsightClient.retain() returns {'accepted', 'async', 'operation_id'}.
+
+    Verify both sync and async SDK response shapes are mapped correctly.
+    """
+    from app.hindsight_client import HindsightClient
+    from types import SimpleNamespace as NS
+
+    wrapper = HindsightClient()
+    monkeypatch.setattr(wrapper, '_client', None)  # reset in case cached
+
+    # Build a fake SDK client whose retain_batch returns controlled RetainResponse shapes
+    fake_sdk = Mock()
+
+    # Async accepted (success=True, var_async=True) → accepted=True, async=True
+    fake_sdk.retain.return_value = NS(
+        success=True, var_async=True, operation_id='op-abc', operation_ids=None
+    )
+    monkeypatch.setattr(wrapper, '_client', fake_sdk)
+    result = wrapper.retain('content', document_id='doc1')
+    assert result == {'accepted': True, 'async': True, 'operation_id': 'op-abc'}
+
+    # Sync accepted (success=True, var_async=False) → accepted=True, async=False
+    fake_sdk.retain.return_value = NS(
+        success=True, var_async=False, operation_id=None, operation_ids=None
+    )
+    result = wrapper.retain('content', document_id='doc2')
+    assert result == {'accepted': True, 'async': False, 'operation_id': None}
+
+    # Failed (success=False) → accepted=False
+    fake_sdk.retain.return_value = NS(
+        success=False, var_async=False, operation_id=None, operation_ids=None
+    )
+    result = wrapper.retain('content', document_id='doc3')
+    assert result['accepted'] is False
 
 
 def test_groq_uses_strict_schema_without_extra_model_call():
@@ -258,9 +292,11 @@ def test_groq_uses_strict_schema_without_extra_model_call():
 def test_analyze_blocked_on_terminal_status(tmp_path):
     """analyze_incident must not change mitigated / escalated / resolved / closed."""
     svc = make_svc(tmp_path, analysis_svc=analyzer())
-    svc.memory = SimpleNamespace(retain_resolved_incident=Mock(return_value=True))
+    svc.memory = SimpleNamespace(
+        retain_resolved_incident=Mock(return_value='accepted'),
+        delete_incident_memory=Mock(return_value=True),
+    )
     item = svc.create_incident(IncidentCreate(**INCIDENT))
-    # Resolve it
     svc.resolve_incident(item.incident_id, ResolutionRequest(**RESOLUTION))
     with pytest.raises(ValueError, match='Cannot analyze'):
         svc.analyze_incident(item.incident_id)
@@ -268,7 +304,10 @@ def test_analyze_blocked_on_terminal_status(tmp_path):
 
 def test_add_update_on_resolved_without_reopen_raises(tmp_path):
     svc = make_svc(tmp_path)
-    svc.memory = SimpleNamespace(retain_resolved_incident=Mock(return_value=True))
+    svc.memory = SimpleNamespace(
+        retain_resolved_incident=Mock(return_value='accepted'),
+        delete_incident_memory=Mock(return_value=True),
+    )
     item = svc.create_incident(IncidentCreate(**INCIDENT))
     svc.resolve_incident(item.incident_id, ResolutionRequest(**RESOLUTION))
     with pytest.raises(ValueError, match='reopen'):
@@ -281,8 +320,9 @@ def test_add_update_on_resolved_without_reopen_raises(tmp_path):
 def test_add_update_with_reopen_clears_resolution_fields(tmp_path):
     svc = make_svc(tmp_path)
     svc.memory = SimpleNamespace(
-        retain_resolved_incident=Mock(return_value=True),
-        hindsight=SimpleNamespace(retain=Mock(return_value={'success': True})),
+        retain_resolved_incident=Mock(return_value='accepted'),
+        retain_incident=Mock(return_value='accepted'),
+        delete_incident_memory=Mock(return_value=True),
     )
     item = svc.create_incident(IncidentCreate(**INCIDENT))
     svc.resolve_incident(item.incident_id, ResolutionRequest(**RESOLUTION))
@@ -325,7 +365,8 @@ def test_concurrent_add_update_during_slow_analyze_keeps_both(tmp_path):
     svc.analysis = SimpleNamespace(analyze_incident=slow_analyze)
     svc.memory = SimpleNamespace(
         recall_similar_incidents=Mock(return_value=[]),
-        hindsight=SimpleNamespace(retain=Mock(return_value={'success': True})),
+        retain_incident=Mock(return_value='accepted'),
+        delete_incident_memory=Mock(return_value=True),
     )
 
     item = svc.create_incident(IncidentCreate(**INCIDENT))
@@ -333,13 +374,11 @@ def test_concurrent_add_update_during_slow_analyze_keeps_both(tmp_path):
     with ThreadPoolExecutor(max_workers=2) as pool:
         f_analyze = pool.submit(svc.analyze_incident, item.incident_id)
 
-        # Wait until the slow call has started, then add an update
         analyze_started.wait(timeout=5)
         svc.add_update(
             item.incident_id,
             IncidentUpdate(note='Found packet loss on eth0 during analysis window.', kind='evidence'),
         )
-        # Let analyze finish
         analyze_may_finish.set()
         f_analyze.result(timeout=10)
 
@@ -352,12 +391,12 @@ def test_ordering_stable_after_update(tmp_path):
     """list_incidents returns newest first; updating a row does not reorder it."""
     svc = make_svc(tmp_path)
     svc.memory = SimpleNamespace(
-        hindsight=SimpleNamespace(retain=Mock(return_value={'success': False})),
+        retain_incident=Mock(return_value='failed'),
+        delete_incident_memory=Mock(return_value=False),
     )
     a = svc.create_incident(IncidentCreate(**INCIDENT))
     b = svc.create_incident(IncidentCreate(**{**INCIDENT, 'title': 'Second incident title here'}))
 
-    # Update the older incident (a); it must stay below b in the list
     svc.add_update(a.incident_id, IncidentUpdate(note='Added update to older incident row.', kind='evidence'))
 
     listed = svc.list_incidents()
@@ -396,17 +435,15 @@ def test_corrupted_row_is_skipped_with_warning(tmp_path, caplog):
 def test_connections_are_closed(tmp_path):
     """
     After all operations, no SQLite connections should remain open.
-    Verified by enabling ResourceWarning and forcing GC.
-    We filter to only sqlite3.Connection-related resource warnings so that
-    unrelated anyio stream warnings from other tests don't cause false failures.
     """
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter('always', ResourceWarning)
 
         svc = make_svc(tmp_path)
         svc.memory = SimpleNamespace(
-            retain_resolved_incident=Mock(return_value=False),
-            hindsight=SimpleNamespace(retain=Mock(return_value={'success': False})),
+            retain_resolved_incident=Mock(return_value='failed'),
+            retain_incident=Mock(return_value='failed'),
+            delete_incident_memory=Mock(return_value=False),
         )
         item = svc.create_incident(IncidentCreate(**INCIDENT))
         svc.get_incident(item.incident_id)
@@ -415,7 +452,6 @@ def test_connections_are_closed(tmp_path):
             item.incident_id,
             IncidentUpdate(note='Checking connection cleanup behaviour now.', kind='evidence'),
         )
-        # Dereference the service and force GC
         del svc
         gc.collect()
 
@@ -528,7 +564,10 @@ def test_legacy_import_runs_once(tmp_path):
 
 def test_preventive_actions_persisted(tmp_path):
     svc = make_svc(tmp_path)
-    svc.memory = SimpleNamespace(retain_resolved_incident=Mock(return_value=False))
+    svc.memory = SimpleNamespace(
+        retain_resolved_incident=Mock(return_value='failed'),
+        delete_incident_memory=Mock(return_value=False),
+    )
     item = svc.create_incident(IncidentCreate(**INCIDENT))
     resolution = ResolutionRequest(
         **RESOLUTION,

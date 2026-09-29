@@ -18,8 +18,15 @@ Design notes
 * Legacy import runs once, guarded by a `meta` table flag, so deleted records
   never reappear.
 
-* The service is NOT instantiated at import time.  main.py creates it in a
-  FastAPI lifespan handler and exposes it via a Depends() dependency.
+* Memory status lifecycle:
+      not_recorded → failed / pending (async) / accepted (sync)
+  ``memory_retained`` (bool) is kept for backward compatibility with older
+  stored payloads and the summary list; it is True only when memory_status
+  is accepted or pending.
+
+* delete_incident also attempts to delete the remote memory document.  A
+  failure there is logged and returned to the caller but does NOT prevent the
+  local record from being deleted.
 """
 
 import json
@@ -27,8 +34,8 @@ import logging
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Dict, Optional, Tuple
 from uuid import uuid4
-from typing import Optional
 import sqlite3
 
 from app.schemas import (
@@ -44,14 +51,17 @@ from app.schemas import (
     MAX_UPDATES_PER_INCIDENT,
 )
 from app.services.analysis_service import analysis_service
-from app.services.memory_service import memory_service
+from app.services.memory_service import (
+    MemoryService,
+    MEMORY_STATUS_NOT_RECORDED,
+    MEMORY_STATUS_ACCEPTED,
+    MEMORY_STATUS_PENDING,
+    MEMORY_STATUS_FAILED,
+    memory_service,
+)
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Allowed status transitions for analyze_incident.
-# Only reported and investigating may transition to investigating.
-# ---------------------------------------------------------------------------
 _ANALYZE_ALLOWED_FROM = frozenset({IncidentStatus.REPORTED, IncidentStatus.INVESTIGATING})
 
 _OUTCOME_TO_STATUS = {
@@ -60,21 +70,19 @@ _OUTCOME_TO_STATUS = {
     "unresolved_escalated": IncidentStatus.ESCALATED,
 }
 
-
-# ---------------------------------------------------------------------------
-# Service
-# ---------------------------------------------------------------------------
+# memory_retained is True when memory was accepted (sync or async/pending)
+_RETAINED_STATUSES = frozenset({MEMORY_STATUS_ACCEPTED, MEMORY_STATUS_PENDING})
 
 
 class IncidentService:
     def __init__(
         self,
-        db_path: Optional[Path] = None,
+        db_path=None,
         analysis_svc=None,
         memory_svc=None,
     ):
         self.analysis = analysis_svc or analysis_service
-        self.memory = memory_svc or memory_service
+        self.memory: MemoryService = memory_svc or memory_service
         self.path = Path(db_path) if db_path else (
             Path(__file__).resolve().parents[2] / "data" / "incidents.sqlite3"
         )
@@ -87,7 +95,6 @@ class IncidentService:
 
     @contextmanager
     def _db(self):
-        """Yield a SQLite connection; commit on success, rollback on error, always close."""
         conn = sqlite3.connect(str(self.path), timeout=10)
         conn.row_factory = sqlite3.Row
         try:
@@ -123,12 +130,10 @@ class IncidentService:
                     value TEXT NOT NULL
                 )
             """)
-            # Migrate existing DBs that lack new columns
             existing = {row[1] for row in db.execute("PRAGMA table_info(incidents)").fetchall()}
             if "version" not in existing:
                 db.execute("ALTER TABLE incidents ADD COLUMN version INTEGER NOT NULL DEFAULT 0")
             if "created_at" not in existing:
-                # SQLite < 3.37 does not allow non-constant defaults in ALTER TABLE.
                 db.execute(
                     "ALTER TABLE incidents ADD COLUMN created_at TEXT NOT NULL "
                     "DEFAULT '1970-01-01T00:00:00.000000Z'"
@@ -140,17 +145,15 @@ class IncidentService:
                 )
 
     # ------------------------------------------------------------------
-    # Legacy seed import (runs exactly once)
+    # Legacy seed import
     # ------------------------------------------------------------------
 
     def import_legacy_once(self):
-        """Import backend/seed/legacy_incidents.json into the DB if not already done."""
         legacy = Path(__file__).resolve().parents[2] / "seed" / "legacy_incidents.json"
         if not legacy.exists():
             return
         with self._db() as db:
-            row = db.execute("SELECT value FROM meta WHERE key='legacy_imported'").fetchone()
-            if row:
+            if db.execute("SELECT value FROM meta WHERE key='legacy_imported'").fetchone():
                 return
             records = json.loads(legacy.read_text(encoding="utf-8")).get("incidents", [])
             now = _utcnow()
@@ -160,8 +163,7 @@ class IncidentService:
                 except Exception as exc:
                     logger.warning(
                         "Skipping malformed legacy record %s: %s",
-                        record.get("incident_id", "?"),
-                        exc,
+                        record.get("incident_id", "?"), exc,
                     )
                     continue
                 db.execute(
@@ -176,16 +178,8 @@ class IncidentService:
     # ------------------------------------------------------------------
 
     def _save(self, incident: Incident, expected_version: int) -> Incident:
-        """
-        Persist *incident* using optimistic concurrency.
-
-        * expected_version == -1  → brand-new row (INSERT … ON CONFLICT DO NOTHING).
-        * otherwise               → UPDATE … WHERE version = expected_version;
-                                    0 rows → ConflictError.
-        """
         now = _utcnow()
         payload = incident.model_dump_json()
-
         with self._db() as db:
             if expected_version == -1:
                 db.execute(
@@ -218,7 +212,6 @@ class IncidentService:
     # ------------------------------------------------------------------
 
     def _load_row(self, db, incident_id: str):
-        """Return (Incident, version) or (None, None)."""
         row = db.execute(
             "SELECT payload, version FROM incidents WHERE id=?", (incident_id,)
         ).fetchone()
@@ -231,12 +224,11 @@ class IncidentService:
             incident, _ = self._load_row(db, incident_id)
         return incident
 
-    def _get_with_version(self, incident_id: str):
+    def _get_with_version(self, incident_id: str) -> Tuple[Optional[Incident], Optional[int]]:
         with self._db() as db:
             return self._load_row(db, incident_id)
 
     def list_incidents(self, limit: int = 200, offset: int = 0):
-        """Return lightweight IncidentSummary objects ordered by created_at DESC."""
         with self._db() as db:
             rows = db.execute(
                 "SELECT payload FROM incidents ORDER BY created_at DESC LIMIT ? OFFSET ?",
@@ -277,13 +269,11 @@ class IncidentService:
         return incident, version
 
     # ------------------------------------------------------------------
-    # Idempotency lookup
+    # Idempotency
     # ------------------------------------------------------------------
 
     def _find_by_client_request_id(self, client_request_id: str) -> Optional[Incident]:
-        """Return the first incident with a matching client_request_id, or None."""
         with self._db() as db:
-            # SQLite JSON extract: fast enough for reasonable DB sizes.
             row = db.execute(
                 "SELECT payload FROM incidents "
                 "WHERE json_extract(payload, '$.client_request_id') = ?",
@@ -298,12 +288,10 @@ class IncidentService:
     # ------------------------------------------------------------------
 
     def create_incident(self, incident_data: IncidentCreate) -> Incident:
-        # Idempotency: return existing if we've seen this client_request_id before.
         if incident_data.client_request_id:
             existing = self._find_by_client_request_id(incident_data.client_request_id)
             if existing is not None:
                 return existing
-
         incident = Incident(
             incident_id="INC-" + uuid4().hex[:8].upper(),
             **incident_data.model_dump(),
@@ -318,11 +306,7 @@ class IncidentService:
                 f"Cannot analyze incident in status {pre.status.value!r}. "
                 f"Only {[s.value for s in _ANALYZE_ALLOWED_FROM]} are allowed."
             )
-
-        # ---- SLOW CALL (outside any lock / transaction) ----
         analysis = self.analysis.analyze_incident(pre.model_dump(mode="json"), use_memory)
-        # ----------------------------------------------------
-
         fresh, ver = self._require_with_version(incident_id)
         fresh.analysis = analysis.model_dump(mode="json")
         if fresh.status in _ANALYZE_ALLOWED_FROM:
@@ -343,36 +327,32 @@ class IncidentService:
         self._save(incident, ver)
 
         # ---- SLOW CALL ----
-        retained = self.memory.retain_resolved_incident(
+        mem_status = self.memory.retain_resolved_incident(
             incident.model_dump(mode="json"), resolution.model_dump(mode="json")
         )
         # -------------------
 
         fresh, ver2 = self._require_with_version(incident_id)
-        fresh.memory_retained = retained
+        fresh.memory_retained = mem_status in _RETAINED_STATUSES
         self._save(fresh, ver2)
         return fresh
 
     def add_update(self, incident_id: str, update: IncidentUpdate) -> Incident:
         incident, ver = self._require_with_version(incident_id)
-
         if incident.status in TERMINAL_STATUSES and not update.reopen:
             raise ValueError(
                 f"Incident {incident_id} is {incident.status.value!r}. "
                 f"Pass reopen=true to add an update and reopen it."
             )
-
         if len(incident.updates) >= MAX_UPDATES_PER_INCIDENT:
             raise ValueError(
                 f"Incident {incident_id} has reached the maximum of "
                 f"{MAX_UPDATES_PER_INCIDENT} updates."
             )
-
         if update.reopen and incident.status in TERMINAL_STATUSES:
             incident.outcome = None
             incident.resolution = None
             incident.resolved_at = None
-
         incident.updates.append({
             "note": update.note,
             "kind": update.kind,
@@ -391,24 +371,18 @@ class IncidentService:
         incident.memory_retained = False
         self._save(incident, ver)
 
-        # ---- SLOW CALL ----
+        # ---- SLOW CALL — never raises; failures become memory_status=failed ----
         try:
-            result = self.memory.hindsight.retain(
-                content=(
-                    "INCIDENT RECORD (human-reported evidence; status may be unresolved):\n"
-                    + incident.model_dump_json(exclude={"analysis"})
-                ),
-                metadata={"incident_id": incident.incident_id, "service": incident.service},
-                context=f"Incident updates for {incident.service}",
-                document_id=incident.incident_id,
-            )
-            retained = bool(result.get("success"))
+            mem_status = self.memory.retain_incident(incident.model_dump(mode="json"))
         except Exception:
-            retained = False
-        # -------------------
+            logger.exception(
+                "retain_incident raised unexpectedly for %s", incident_id
+            )
+            mem_status = MEMORY_STATUS_FAILED
+        # -----------------------------------------------------------------------
 
         fresh, ver2 = self._require_with_version(incident_id)
-        fresh.memory_retained = retained
+        fresh.memory_retained = mem_status in _RETAINED_STATUSES
         self._save(fresh, ver2)
         return fresh
 
@@ -423,17 +397,31 @@ class IncidentService:
         incident = {"incident_id": "COMPARISON", **incident_data.model_dump(mode="json")}
         return self.analysis.compare_analysis(incident)
 
-    def delete_incident(self, incident_id: str) -> None:
+    def delete_incident(self, incident_id: str) -> Dict[str, object]:
+        """Delete the local incident record and attempt to delete the remote memory.
+
+        Returns:
+            {'deleted': True, 'memory_deleted': bool, 'memory_note': str}
+        """
         with self._db() as db:
             cur = db.execute("DELETE FROM incidents WHERE id=?", (incident_id,))
         if cur.rowcount == 0:
             raise NotFoundError(f"Incident {incident_id!r} not found")
 
+        # Best-effort remote delete — never raises; failure is surfaced to caller.
+        memory_deleted = self.memory.delete_incident_memory(incident_id)
+        memory_note = (
+            "Memory document deleted."
+            if memory_deleted
+            else "Local record deleted. Remote memory document could not be deleted; "
+                 "it will expire or can be removed manually."
+        )
+        return {"deleted": True, "memory_deleted": memory_deleted, "memory_note": memory_note}
+
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
 
 def _utcnow() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"

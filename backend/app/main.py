@@ -99,7 +99,8 @@ async def lifespan(app: FastAPI):
     _incident_service = IncidentService()
     _incident_service.import_legacy_once()
     yield
-    # Nothing to tear down for SQLite; connections are closed per-request.
+    # Close the shared Hindsight SDK connection on shutdown.
+    hindsight_client.close()
 
 
 def get_incident_service() -> IncidentService:
@@ -420,8 +421,13 @@ def delete_incident(
     incident_id: str,
     svc: IncidentService = Depends(get_incident_service),
 ):
-    svc.delete_incident(incident_id)
-    return DeleteResponse(incident_id=incident_id, deleted=True)
+    result = svc.delete_incident(incident_id)
+    return DeleteResponse(
+        incident_id=incident_id,
+        deleted=result["deleted"],
+        memory_deleted=result["memory_deleted"],
+        memory_note=result["memory_note"],
+    )
 
 
 @app.post("/api/memory/recall", response_model=MemoryRecallResponse)

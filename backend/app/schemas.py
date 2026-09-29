@@ -363,6 +363,8 @@ class ResolutionResponse(BaseModel):
 class DeleteResponse(BaseModel):
     incident_id: str
     deleted: bool
+    memory_deleted: bool = False
+    memory_note: str = ""
 
 
 class MemoryRecallResponse(BaseModel):
